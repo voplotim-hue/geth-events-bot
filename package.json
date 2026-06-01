@@ -1,0 +1,16 @@
+{
+  "name": "telegram-excel-events-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "build:workbook": "node scripts/build-workbook.mjs",
+    "resolve:workbook": "node scripts/resolve-workbook-id.mjs",
+    "check:google": "node scripts/check-google-sheets.mjs",
+    "check:apps-script": "node scripts/check-apps-script.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

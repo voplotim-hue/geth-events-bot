@@ -1,0 +1,23 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geth-events-bot
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      TZ: Europe/Minsk
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # If you switch from Apps Script to a Google service account later,
+    # uncomment this mount and put service-account.json next to compose.
+    # volumes:
+    #   - ./service-account.json:/app/service-account.json:ro

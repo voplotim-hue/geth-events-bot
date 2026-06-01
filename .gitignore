@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+node_modules
+outputs
+*.log
+.DS_Store
+service-account*.json
+google-service-account*.json
