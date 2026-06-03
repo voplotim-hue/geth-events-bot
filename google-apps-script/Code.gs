@@ -2,6 +2,10 @@
 // Do not commit the real secret to GitHub.
 const BOT_SECRET = 'replace_with_GOOGLE_APPS_SCRIPT_SECRET';
 
+const USERS_SHEET_NAME = 'Users';
+const ROLE_HEADER = 'Роль';
+const ROLE_VALUES = ['Участник', 'Помощник', 'Админ'];
+
 function jsonResponse(payload) {
   return ContentService
     .createTextOutput(JSON.stringify(payload))
@@ -18,6 +22,79 @@ function sheetByName(name) {
     throw new Error(`Sheet not found: ${name}`);
   }
   return sheet;
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('GethEvents')
+    .addItem('Назначить помощником', 'assignAssistantRole')
+    .addItem('Сделать участником', 'assignParticipantRole')
+    .addItem('Назначить админом в таблице', 'assignAdminRole')
+    .addSeparator()
+    .addItem('Подготовить колонку «Роль»', 'prepareRoleColumn')
+    .addToUi();
+}
+
+function roleColumnIndex(sheet) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+    .map((header) => String(header || '').trim());
+  const index = headers.indexOf(ROLE_HEADER);
+  return index === -1 ? 0 : index + 1;
+}
+
+function prepareRoleColumn() {
+  const sheet = sheetByName(USERS_SHEET_NAME);
+  let column = roleColumnIndex(sheet);
+  if (!column) {
+    column = sheet.getLastColumn() + 1;
+    sheet.getRange(1, column).setValue(ROLE_HEADER);
+  }
+
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(ROLE_VALUES, true)
+    .setAllowInvalid(false)
+    .build();
+
+  sheet.getRange(2, column, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
+  sheet.getRange(1, column).setFontWeight('bold');
+  return column;
+}
+
+function setSelectedUsersRole(role) {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  if (sheet.getName() !== USERS_SHEET_NAME) {
+    SpreadsheetApp.getUi().alert('Откройте лист Users и выделите строки анкет.');
+    return;
+  }
+
+  const roleColumn = prepareRoleColumn();
+  const range = sheet.getActiveRange();
+  if (!range || range.getRow() === 1 && range.getNumRows() === 1) {
+    SpreadsheetApp.getUi().alert('Выделите одну или несколько строк пользователей ниже заголовка.');
+    return;
+  }
+
+  const startRow = Math.max(range.getRow(), 2);
+  const endRow = range.getLastRow();
+  if (endRow < 2) {
+    SpreadsheetApp.getUi().alert('Выделите строки пользователей ниже заголовка.');
+    return;
+  }
+
+  sheet.getRange(startRow, roleColumn, endRow - startRow + 1, 1)
+    .setValues(Array.from({ length: endRow - startRow + 1 }, () => [role]));
+}
+
+function assignAssistantRole() {
+  setSelectedUsersRole('Помощник');
+}
+
+function assignParticipantRole() {
+  setSelectedUsersRole('Участник');
+}
+
+function assignAdminRole() {
+  setSelectedUsersRole('Админ');
 }
 
 function readTable(sheetName) {

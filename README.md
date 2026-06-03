@@ -6,6 +6,7 @@
 
 - Привязка пользователя через `/start`.
 - Анкета пользователя после `/start`: дата рождения, ФИО одной строкой и церковь.
+- Роль пользователя в карточке: `Участник`, `Помощник`, `Админ`.
 - Команда администратора `/event` для публикации регистрации в группе.
 - Запись ответа пользователя в таблицу `Registrations`.
 - Автоматическое добавление проголосовавших в лист `EventRoster` в формате прошлого мероприятия.
@@ -96,6 +97,14 @@ GOOGLE_APPS_SCRIPT_URL=https://script.google.com/macros/s/.../exec
 ```bash
 node scripts/check-apps-script.mjs
 ```
+
+После обновления Apps Script в таблице появится меню `GethEvents`. На листе `Users` можно выделить одну или несколько строк анкет и выбрать:
+
+- `Назначить помощником`
+- `Сделать участником`
+- `Назначить админом в таблице`
+
+Меню меняет значение в колонке `Роль`.
 
 ## Google Sheets Через Service Account
 
@@ -201,7 +210,7 @@ docker compose down
 `Users` - карточки пользователей:
 
 ```text
-telegram_user_id | username | last_name | first_name | middle_name | birth_date | church | gender | parent_consent | medical_certificate | private_chat_id | is_active | notes | updated_at
+telegram_user_id | username | last_name | first_name | middle_name | birth_date | church | gender | parent_consent | medical_certificate | private_chat_id | is_active | notes | updated_at | role
 ```
 
 `Events` - мероприятия:
@@ -219,10 +228,10 @@ event_id | event_title | telegram_user_id | username | full_name | answer | prev
 `EventRoster` - реестр мероприятия в стиле прошлой таблицы:
 
 ```text
-event_id | ФИ | Сдал | Церковь | Дата рождения | примечание | Пол | Согласие родителей | Справка | Ответ | Статус решения | username | telegram_user_id | answered_at
+event_id | ФИ | Сдал | Церковь | Дата рождения | примечание | Пол | Согласие родителей | Справка | Ответ | Статус решения | username | telegram_user_id | answered_at | role
 ```
 
-Когда пользователь нажимает кнопку регистрации, бот берет ФИО, церковь, дату рождения, пол, согласие родителей и справку из `Users`, а затем добавляет или обновляет строку в `EventRoster`. Если человек поменял вариант ответа, в `Статус решения` появится `изменил решение`.
+Когда пользователь нажимает кнопку регистрации, бот берет ФИО, церковь, дату рождения, пол, согласие родителей, справку и роль из `Users`, а затем добавляет или обновляет строку в `EventRoster`. Если человек поменял вариант ответа, в `Статус решения` появится `изменил решение`.
 
 `BirthdayLog` - лог поздравлений:
 

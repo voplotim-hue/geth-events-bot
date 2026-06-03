@@ -20,7 +20,8 @@ const seedUsers = [
     "",
     "yes",
     "admin; open Telegram info provided manually",
-    ""
+    "",
+    "Админ"
   ],
   [
     "384813731",
@@ -36,7 +37,8 @@ const seedUsers = [
     "",
     "yes",
     "superadmin and birthday approver; full name provided manually; Telegram profile first=Roman",
-    ""
+    "",
+    "Админ"
   ],
   [
     "443839519",
@@ -52,7 +54,8 @@ const seedUsers = [
     "",
     "yes",
     "admin; open Telegram info from screenshot; Telegram profile first=W last=Alex",
-    ""
+    "",
+    "Админ"
   ],
   [
     "6605138381",
@@ -68,7 +71,8 @@ const seedUsers = [
     "",
     "yes",
     "admin; birth date and Telegram info provided manually; Telegram profile first=Ksenia Orsik",
-    ""
+    "",
+    "Админ"
   ],
   [
     "397001327",
@@ -84,7 +88,8 @@ const seedUsers = [
     "",
     "yes",
     "admin; birth date and Telegram info provided manually; Telegram profile first=Ilya",
-    ""
+    "",
+    "Админ"
   ],
   [
     "1901156243",
@@ -100,7 +105,8 @@ const seedUsers = [
     "",
     "yes",
     "admin; birth date and Telegram info provided manually",
-    ""
+    "",
+    "Админ"
   ]
 ];
 
@@ -132,7 +138,8 @@ const sheets = [
       "private_chat_id",
       "is_active",
       "notes",
-      "updated_at"
+      "updated_at",
+      "role"
     ],
     rows: seedUsers
   },
@@ -208,7 +215,8 @@ const sheets = [
       "Статус решения",
       "username",
       "telegram_user_id",
-      "answered_at"
+      "answered_at",
+      "role"
     ],
     example: [
       "example",
@@ -224,7 +232,8 @@ const sheets = [
       "",
       "d_shaplyko",
       "8693437323",
-      ""
+      "",
+      "Админ"
     ]
   },
   {

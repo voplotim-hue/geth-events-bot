@@ -15,7 +15,8 @@ const USER_COLUMNS = [
   "private_chat_id",
   "is_active",
   "notes",
-  "updated_at"
+  "updated_at",
+  "role"
 ];
 
 const EVENT_COLUMNS = [
@@ -59,7 +60,8 @@ const EVENT_ROSTER_COLUMNS = [
   "Статус решения",
   "username",
   "telegram_user_id",
-  "answered_at"
+  "answered_at",
+  "role"
 ];
 
 const BIRTHDAY_LOG_COLUMNS = [
@@ -255,6 +257,7 @@ export class ExcelStore {
         username: user.username || existing.username || "",
         private_chat_id: privateChatId || existing.private_chat_id || "",
         is_active: existing.is_active || "yes",
+        role: existing.role || "Участник",
         updated_at: isoNow()
       };
       await this.updateSheetRow(tableName, existing._rowNumber, this.valuesFor(USER_COLUMNS, next));
@@ -275,7 +278,8 @@ export class ExcelStore {
       private_chat_id: privateChatId,
       is_active: "yes",
       notes: "created by bot",
-      updated_at: isoNow()
+      updated_at: isoNow(),
+      role: "Участник"
     };
     await this.appendRow(tableName, this.valuesFor(USER_COLUMNS, row));
     return row;
@@ -302,7 +306,8 @@ export class ExcelStore {
       private_chat_id: privateChatId || user.private_chat_id || "",
       is_active: user.is_active || "yes",
       notes: user.notes || "updated by profile form",
-      updated_at: isoNow()
+      updated_at: isoNow(),
+      role: user.role || "Участник"
     };
 
     await this.updateSheetRow(tableName, user._rowNumber, this.valuesFor(USER_COLUMNS, next));
@@ -394,7 +399,8 @@ export class ExcelStore {
       "Статус решения": decisionChanged ? "изменил решение" : "",
       username: registration.username,
       telegram_user_id: telegramUserId,
-      answered_at: registration.answered_at
+      answered_at: registration.answered_at,
+      role: user.role || ""
     };
 
     if (existing) {
