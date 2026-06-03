@@ -37,6 +37,29 @@ function parseEventCommand(text, defaultOptions) {
   return { title, dates, description, options };
 }
 
+const EVENT_FIELDS = [
+  {
+    key: "title",
+    label: "Название мероприятия",
+    prompt: "Введите название мероприятия, например: Летний лагерь."
+  },
+  {
+    key: "dates",
+    label: "Даты",
+    prompt: "Введите даты или сроки мероприятия, например: 15-20 июля. Если даты пока не нужны, отправьте -."
+  },
+  {
+    key: "description",
+    label: "Комментарий",
+    prompt: "Введите комментарий для участников. Если комментарий не нужен, отправьте -."
+  },
+  {
+    key: "options",
+    label: "Варианты ответа",
+    prompt: "Введите варианты ответа через запятую, например: Еду, Не еду, Думаю. Чтобы использовать стандартные варианты, отправьте -."
+  }
+];
+
 const PROFILE_FIELDS = [
   {
     key: "birth_date",
@@ -127,6 +150,34 @@ function profileSummary(profile) {
   ].join("\n");
 }
 
+function normalizeOptionalEventValue(value) {
+  const text = normalizeProfileText(value);
+  return text === "-" ? "" : text;
+}
+
+function parseEventOptions(value, defaultOptions) {
+  const text = normalizeProfileText(value);
+  if (text === "-") return defaultOptions;
+
+  return text
+    .split(/[,\n;]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function eventDraftSummary(draft) {
+  return [
+    "Проверьте мероприятие:",
+    "",
+    `Название: ${draft.title}`,
+    `Даты: ${draft.dates || "-"}`,
+    `Комментарий: ${draft.description || "-"}`,
+    `Варианты: ${draft.options.join(", ")}`,
+    "",
+    "Если всё верно, нажмите «Опубликовать регистрацию»."
+  ].join("\n");
+}
+
 export class Bot {
   constructor({ config, telegram, store, logger = console }) {
     this.config = config;
@@ -137,6 +188,7 @@ export class Bot {
     this.stopped = false;
     this.pendingBirthdayEdits = new Map();
     this.pendingUserProfiles = new Map();
+    this.pendingEventDrafts = new Map();
   }
 
   isAdmin(userId) {
@@ -150,6 +202,10 @@ export class Bot {
     }
 
     return this.isAdmin(userId);
+  }
+
+  canManageEvents(userId) {
+    return this.isAdmin(userId) || String(this.config.birthdayApproverChatId || "") === String(userId);
   }
 
   async start() {
@@ -196,6 +252,7 @@ export class Bot {
       return;
     }
 
+    if (await this.handlePendingEventText(message)) return;
     if (await this.handlePendingBirthdayText(message)) return;
     if (await this.handlePendingProfileText(message)) return;
 
@@ -216,6 +273,11 @@ export class Bot {
 
     if (command === "/event") {
       await this.handleEventCommand(message);
+      return;
+    }
+
+    if (command === "/new_event" || command === "/registration") {
+      await this.handleNewEventCommand(message);
       return;
     }
 
@@ -245,10 +307,13 @@ export class Bot {
       "Привет, теперь ты официально присоединился к группе GethTeens и наше взаимодействие станет намного удобнее! Заполни короткую анкету, чтоб администраторы видели необходимые данные для дальнейшей регистрации на всех запланированных мероприятиях."
     );
     await this.sendCurrentProfilePrompt(message.chat.id, message.from.id);
+    if (this.canManageEvents(message.from.id)) {
+      await this.sendAdminPanel(message.chat.id);
+    }
   }
 
   async handleEventCommand(message) {
-    if (!this.isAdmin(message.from.id)) {
+    if (!this.canManageEvents(message.from.id)) {
       await this.telegram.sendMessage(message.chat.id, "Эта команда доступна только администраторам.");
       return;
     }
@@ -304,6 +369,30 @@ export class Bot {
     }
   }
 
+  async handleNewEventCommand(message) {
+    if (!this.canManageEvents(message.from.id)) {
+      await this.telegram.sendMessage(message.chat.id, "Создавать мероприятия могут только администраторы.");
+      return;
+    }
+
+    if (message.chat.type !== "private") {
+      await this.telegram.sendMessage(message.chat.id, "Создание мероприятия удобнее пройти в личном чате с ботом. Откройте бота в ЛС и нажмите /new_event.");
+      return;
+    }
+
+    await this.startEventWizard(message.chat.id, message.from.id);
+  }
+
+  async sendAdminPanel(chatId) {
+    await this.telegram.sendMessage(chatId, "Панель администратора:", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Создать регистрацию на мероприятие", callback_data: "event:new" }]
+        ]
+      }
+    });
+  }
+
   async handleBirthdaysCommand(message) {
     if (!this.isAdmin(message.from.id)) {
       await this.telegram.sendMessage(message.chat.id, "Эта команда доступна только администраторам.");
@@ -341,6 +430,11 @@ export class Bot {
 
     if (kind === "profile") {
       await this.handleProfileCallback(callbackQuery);
+      return;
+    }
+
+    if (kind === "event") {
+      await this.handleEventWizardCallback(callbackQuery);
       return;
     }
 
@@ -396,6 +490,183 @@ export class Bot {
 
     this.telegram.editMessageReplyMarkup(chatId, messageId, { inline_keyboard: [] })
       .catch((error) => this.logger.warn(`[callback_keyboard_clear] ${error.message}`));
+  }
+
+  async startEventWizard(chatId, userId) {
+    if (!this.store.enabled) {
+      await this.telegram.sendMessage(chatId, "Таблица не настроена. Администратор должен проверить .env.");
+      return;
+    }
+
+    if (!this.config.groupChatId) {
+      await this.telegram.sendMessage(chatId, "Не указан GROUP_CHAT_ID. Без него бот не знает, куда публиковать регистрацию.");
+      return;
+    }
+
+    this.pendingUserProfiles.delete(String(userId));
+    this.pendingEventDrafts.set(String(userId), {
+      step: 0,
+      data: {},
+      status: "collecting"
+    });
+
+    await this.telegram.sendMessage(chatId, "Создаём новую регистрацию на мероприятие.");
+    await this.sendCurrentEventPrompt(chatId, userId);
+  }
+
+  async sendCurrentEventPrompt(chatId, userId) {
+    const state = this.pendingEventDrafts.get(String(userId));
+    if (!state) return;
+
+    const field = EVENT_FIELDS[state.step];
+    await this.telegram.sendMessage(chatId, [
+      `${state.step + 1}/${EVENT_FIELDS.length}. ${field.label}`,
+      "",
+      field.prompt,
+      "",
+      "Чтобы отменить создание, отправьте /cancel."
+    ].join("\n"));
+  }
+
+  async handlePendingEventText(message) {
+    const userId = String(message.from?.id || "");
+    const state = this.pendingEventDrafts.get(userId);
+    if (!state || message.chat.type !== "private") return false;
+
+    const text = String(message.text || "").trim();
+    if (!text) return false;
+
+    if (text === "/cancel") {
+      this.pendingEventDrafts.delete(userId);
+      await this.telegram.sendMessage(message.chat.id, "Ок, создание мероприятия отменено.");
+      await this.sendAdminPanel(message.chat.id);
+      return true;
+    }
+
+    if (text.startsWith("/")) return false;
+
+    if (state.status === "confirm") {
+      await this.telegram.sendMessage(message.chat.id, "Черновик уже готов. Нажмите «Опубликовать регистрацию», «Заполнить заново» или «Отменить» под предпросмотром.");
+      return true;
+    }
+
+    const field = EVENT_FIELDS[state.step];
+    if (field.key === "title") {
+      const title = normalizeProfileText(text);
+      if (!title) {
+        await this.telegram.sendMessage(message.chat.id, "Название нужно заполнить.");
+        return true;
+      }
+      state.data.title = title;
+    }
+
+    if (field.key === "dates") {
+      state.data.dates = normalizeOptionalEventValue(text);
+    }
+
+    if (field.key === "description") {
+      state.data.description = normalizeOptionalEventValue(text);
+    }
+
+    if (field.key === "options") {
+      const options = parseEventOptions(text, this.config.defaultOptions);
+      if (options.length < 2) {
+        await this.telegram.sendMessage(message.chat.id, "Нужно минимум два варианта ответа. Например: Еду, Не еду.");
+        return true;
+      }
+      state.data.options = options;
+    }
+
+    state.step += 1;
+    if (state.step < EVENT_FIELDS.length) {
+      await this.sendCurrentEventPrompt(message.chat.id, userId);
+      return true;
+    }
+
+    state.status = "confirm";
+    await this.telegram.sendMessage(message.chat.id, eventDraftSummary(state.data), {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Опубликовать регистрацию", callback_data: "event:publish" }],
+          [{ text: "Заполнить заново", callback_data: "event:restart" }],
+          [{ text: "Отменить", callback_data: "event:cancel" }]
+        ]
+      }
+    });
+    return true;
+  }
+
+  async handleEventWizardCallback(callbackQuery) {
+    const [, action] = String(callbackQuery.data || "").split(":");
+    const userId = String(callbackQuery.from?.id || "");
+
+    if (!this.canManageEvents(userId)) {
+      await this.telegram.answerCallbackQuery(callbackQuery.id, "Создавать мероприятия могут только администраторы.");
+      return;
+    }
+
+    if (action === "new" || action === "restart") {
+      this.clearCallbackKeyboard(callbackQuery);
+      await this.telegram.answerCallbackQuery(callbackQuery.id, action === "new" ? "Начинаем создание." : "Заполняем заново.");
+      await this.startEventWizard(callbackQuery.message.chat.id, callbackQuery.from.id);
+      return;
+    }
+
+    if (action === "cancel") {
+      this.pendingEventDrafts.delete(userId);
+      this.clearCallbackKeyboard(callbackQuery);
+      await this.telegram.answerCallbackQuery(callbackQuery.id, "Создание отменено.");
+      await this.sendAdminPanel(callbackQuery.message.chat.id);
+      return;
+    }
+
+    if (action !== "publish") {
+      await this.telegram.answerCallbackQuery(callbackQuery.id, "Неизвестное действие.");
+      return;
+    }
+
+    const state = this.pendingEventDrafts.get(userId);
+    if (!state || state.status !== "confirm") {
+      await this.telegram.answerCallbackQuery(callbackQuery.id, "Черновик не найден. Создайте мероприятие заново.");
+      return;
+    }
+
+    await this.telegram.answerCallbackQuery(callbackQuery.id, "Публикую регистрацию.");
+    this.clearCallbackKeyboard(callbackQuery);
+
+    try {
+      const result = await this.publishEventDraft(state.data);
+      this.pendingEventDrafts.delete(userId);
+      await this.telegram.sendMessage(
+        callbackQuery.message.chat.id,
+        `✅ Регистрация опубликована. event_id: ${result.eventId}`
+      );
+      await this.sendAdminPanel(callbackQuery.message.chat.id);
+    } catch (error) {
+      this.logger.error("[event_publish]", error);
+      await this.telegram.sendMessage(callbackQuery.message.chat.id, "Не удалось опубликовать регистрацию. Ошибка уже в логах.");
+    }
+  }
+
+  async publishEventDraft(draft) {
+    const eventId = `ev_${Date.now().toString(36)}`;
+    const inlineKeyboard = draft.options.map((option, index) => [{
+      text: option,
+      callback_data: callbackData(eventId, index)
+    }]);
+
+    const sent = await this.telegram.sendMessage(this.config.groupChatId, eventText(draft), {
+      reply_markup: { inline_keyboard: inlineKeyboard }
+    });
+
+    await this.store.createEvent({
+      eventId,
+      ...draft,
+      groupChatId: this.config.groupChatId,
+      messageId: sent.message_id
+    });
+
+    return { eventId, messageId: sent.message_id };
   }
 
   startProfileForm(userId) {
@@ -506,9 +777,8 @@ export class Bot {
       return;
     }
 
-    const missing = PROFILE_FIELDS
-      .filter((field) => field.key !== "middle_name")
-      .filter((field) => !state.data[field.key]);
+    const missing = ["birth_date", "last_name", "first_name", "church"]
+      .filter((key) => !state.data[key]);
     if (missing.length) {
       await this.telegram.answerCallbackQuery(callbackQuery.id, "В анкете не хватает данных. Заполните заново.");
       return;
@@ -686,6 +956,7 @@ export class Bot {
       "Команды:",
       "/start - привязать Telegram и заполнить анкету",
       "/id - показать chat_id и user_id",
+      "/new_event - создать регистрацию на мероприятие через мастер",
       "/event Название | даты | описание | Еду,Не еду,Пока не знаю - создать регистрацию",
       "/birthdays - создать черновики поздравлений и отправить суперадмину на подтверждение"
     ].join("\n");
