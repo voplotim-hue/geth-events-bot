@@ -5,6 +5,28 @@ const BOT_SECRET = 'replace_with_GOOGLE_APPS_SCRIPT_SECRET';
 const USERS_SHEET_NAME = 'Users';
 const ROLE_HEADER = 'Роль';
 const ROLE_VALUES = ['Участник', 'Помощник', 'Админ'];
+const ROLE_STYLES = {
+  'Админ': {
+    rank: 1,
+    background: '#fce4d6',
+    fontColor: '#9c2f1a'
+  },
+  'Помощник': {
+    rank: 2,
+    background: '#fff2cc',
+    fontColor: '#7f6000'
+  },
+  'Участник': {
+    rank: 3,
+    background: '#ffffff',
+    fontColor: '#202124'
+  },
+  '': {
+    rank: 4,
+    background: '#ffffff',
+    fontColor: '#202124'
+  }
+};
 
 function jsonResponse(payload) {
   return ContentService
@@ -31,8 +53,22 @@ function onOpen() {
     .addItem('Сделать участником', 'assignParticipantRole')
     .addItem('Назначить админом в таблице', 'assignAdminRole')
     .addSeparator()
-    .addItem('Подготовить колонку «Роль»', 'prepareRoleColumn')
+    .addItem('Обновить порядок и цвета ролей', 'applyUsersRoleView')
     .addToUi();
+}
+
+function onEdit(e) {
+  const sheet = e && e.range ? e.range.getSheet() : null;
+  if (!sheet || sheet.getName() !== USERS_SHEET_NAME) return;
+
+  const roleColumn = roleColumnIndex(sheet);
+  if (!roleColumn) return;
+
+  const edited = e.range;
+  const touchesRoleColumn = edited.getColumn() <= roleColumn && edited.getLastColumn() >= roleColumn;
+  if (edited.getRow() > 1 && touchesRoleColumn) {
+    applyUsersRoleView();
+  }
 }
 
 function roleColumnIndex(sheet) {
@@ -56,8 +92,70 @@ function prepareRoleColumn() {
     .build();
 
   sheet.getRange(2, column, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
-  sheet.getRange(1, column).setFontWeight('bold');
+  sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    .setFontWeight('bold')
+    .setBackground('#0f6b85')
+    .setFontColor('#ffffff');
   return column;
+}
+
+function roleRank(value) {
+  return (ROLE_STYLES[String(value || '').trim()] || ROLE_STYLES['']).rank;
+}
+
+function roleStyle(value) {
+  return ROLE_STYLES[String(value || '').trim()] || ROLE_STYLES[''];
+}
+
+function applyRoleColors(sheet, roleColumn) {
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (lastRow < 2) return;
+
+  const roleValues = sheet.getRange(2, roleColumn, lastRow - 1, 1).getValues();
+  const backgrounds = [];
+  const fontColors = [];
+
+  roleValues.forEach(([role]) => {
+    const style = roleStyle(role);
+    backgrounds.push(Array.from({ length: lastColumn }, () => style.background));
+    fontColors.push(Array.from({ length: lastColumn }, () => style.fontColor));
+  });
+
+  sheet.getRange(2, 1, lastRow - 1, lastColumn)
+    .setBackgrounds(backgrounds)
+    .setFontColors(fontColors);
+}
+
+function applyUsersRoleView() {
+  const sheet = sheetByName(USERS_SHEET_NAME);
+  const roleColumn = prepareRoleColumn();
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (lastRow < 2) {
+    applyRoleColors(sheet, roleColumn);
+    return;
+  }
+
+  const range = sheet.getRange(2, 1, lastRow - 1, lastColumn);
+  const rows = range.getValues();
+  const nonEmptyRows = rows.filter((row) => row.some((cell) => cell !== ''));
+
+  nonEmptyRows.sort((a, b) => {
+    const rankDiff = roleRank(a[roleColumn - 1]) - roleRank(b[roleColumn - 1]);
+    if (rankDiff) return rankDiff;
+    const aName = [a[2], a[3], a[4]].filter(Boolean).join(' ');
+    const bName = [b[2], b[3], b[4]].filter(Boolean).join(' ');
+    return String(aName || a[1] || '').localeCompare(String(bName || b[1] || ''), 'ru');
+  });
+
+  range.clearContent();
+  if (nonEmptyRows.length) {
+    sheet.getRange(2, 1, nonEmptyRows.length, lastColumn).setValues(nonEmptyRows);
+  }
+
+  applyRoleColors(sheet, roleColumn);
+  sheet.setFrozenRows(1);
 }
 
 function setSelectedUsersRole(role) {
@@ -83,6 +181,7 @@ function setSelectedUsersRole(role) {
 
   sheet.getRange(startRow, roleColumn, endRow - startRow + 1, 1)
     .setValues(Array.from({ length: endRow - startRow + 1 }, () => [role]));
+  applyUsersRoleView();
 }
 
 function assignAssistantRole() {
@@ -117,12 +216,18 @@ function readTable(sheetName) {
 function appendRow(sheetName, values) {
   const sheet = sheetByName(sheetName);
   sheet.appendRow(values);
+  if (sheetName === USERS_SHEET_NAME) {
+    applyUsersRoleView();
+  }
   return { rowNumber: sheet.getLastRow() };
 }
 
 function updateRow(sheetName, rowNumber, values) {
   const sheet = sheetByName(sheetName);
   sheet.getRange(Number(rowNumber), 1, 1, values.length).setValues([values]);
+  if (sheetName === USERS_SHEET_NAME) {
+    applyUsersRoleView();
+  }
   return { rowNumber: Number(rowNumber) };
 }
 
@@ -143,6 +248,11 @@ function doPost(e) {
 
     if (body.action === 'updateRow') {
       return jsonResponse({ ok: true, result: updateRow(body.sheetName, body.rowNumber, body.values || []) });
+    }
+
+    if (body.action === 'applyRoleView') {
+      applyUsersRoleView();
+      return jsonResponse({ ok: true, result: { applied: true } });
     }
 
     return fail(`Unknown action: ${body.action}`);
