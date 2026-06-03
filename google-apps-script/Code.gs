@@ -4,7 +4,7 @@ const BOT_SECRET = 'replace_with_GOOGLE_APPS_SCRIPT_SECRET';
 
 const USERS_SHEET_NAME = 'Users';
 const ROLE_HEADER = 'Роль';
-const ROLE_VALUES = ['Участник', 'Помощник', 'Админ'];
+const ROLE_VALUES = ['Участник', 'Помощник', 'Админ', 'Гость'];
 const ROLE_STYLES = {
   'Админ': {
     rank: 1,
@@ -21,8 +21,13 @@ const ROLE_STYLES = {
     background: '#ffffff',
     fontColor: '#202124'
   },
-  '': {
+  'Гость': {
     rank: 4,
+    background: '#eef2f7',
+    fontColor: '#5f6368'
+  },
+  '': {
+    rank: 5,
     background: '#ffffff',
     fontColor: '#202124'
   }
@@ -51,6 +56,7 @@ function onOpen() {
     .createMenu('GethEvents')
     .addItem('Назначить помощником', 'assignAssistantRole')
     .addItem('Сделать участником', 'assignParticipantRole')
+    .addItem('Назначить гостем', 'assignGuestRole')
     .addItem('Назначить админом в таблице', 'assignAdminRole')
     .addSeparator()
     .addItem('Обновить порядок и цвета ролей', 'applyUsersRoleView')
@@ -190,6 +196,10 @@ function assignAssistantRole() {
 
 function assignParticipantRole() {
   setSelectedUsersRole('Участник');
+}
+
+function assignGuestRole() {
+  setSelectedUsersRole('Гость');
 }
 
 function assignAdminRole() {

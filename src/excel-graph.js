@@ -1,5 +1,6 @@
 import { isoNow, parseBirthday } from "./time.js";
 import { normalizeBlessingTemplates } from "./blessings.js";
+import { isGuestRole, resolveProfileRole } from "./roles.js";
 
 const USER_COLUMNS = [
   "telegram_user_id",
@@ -307,7 +308,7 @@ export class ExcelStore {
       is_active: user.is_active || "yes",
       notes: user.notes || "updated by profile form",
       updated_at: isoNow(),
-      role: user.role || "Участник"
+      role: resolveProfileRole(user, profile)
     };
 
     await this.updateSheetRow(tableName, user._rowNumber, this.valuesFor(USER_COLUMNS, next));
@@ -416,6 +417,7 @@ export class ExcelStore {
     return rows.filter((row) => {
       const active = String(row.is_active || "yes").toLowerCase();
       if (["no", "false", "0", "нет"].includes(active)) return false;
+      if (isGuestRole(row.role)) return false;
       const birthday = parseBirthday(row.birth_date);
       return birthday?.month === month && birthday?.day === day;
     });
