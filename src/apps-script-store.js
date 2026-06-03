@@ -298,6 +298,28 @@ export class AppsScriptStore {
     return rows.find((row) => normalizeUserId(row.telegram_user_id) === normalizeUserId(telegramUserId));
   }
 
+  async updateUserProfile({ telegramUser, privateChatId = "", profile }) {
+    const sheetName = this.config.sheets.users;
+    const user = await this.ensureUserFromTelegram(telegramUser, privateChatId);
+    const next = {
+      ...user,
+      telegram_user_id: normalizeUserId(telegramUser.id || user.telegram_user_id),
+      username: telegramUser.username || user.username || "",
+      last_name: profile.last_name,
+      first_name: profile.first_name,
+      middle_name: profile.middle_name,
+      birth_date: profile.birth_date,
+      church: profile.church,
+      private_chat_id: privateChatId || user.private_chat_id || "",
+      is_active: user.is_active || "yes",
+      notes: user.notes || "updated by profile form",
+      updated_at: isoNow()
+    };
+
+    await this.updateSheetRow(sheetName, user._rowNumber, this.valuesFor(USER_COLUMNS, next));
+    return next;
+  }
+
   async createEvent(event) {
     const sheetName = this.config.sheets.events;
     const row = {

@@ -37,6 +37,100 @@ function parseEventCommand(text, defaultOptions) {
   return { title, dates, description, options };
 }
 
+const PROFILE_FIELDS = [
+  {
+    key: "birth_date",
+    label: "Дата рождения",
+    prompt: "Укажите дату рождения в формате ДД.ММ.ГГГГ, например 22.03.1996."
+  },
+  {
+    key: "last_name",
+    label: "Фамилия",
+    prompt: "Укажите вашу фамилию."
+  },
+  {
+    key: "first_name",
+    label: "Имя",
+    prompt: "Укажите ваше имя."
+  },
+  {
+    key: "middle_name",
+    label: "Отчество",
+    prompt: "Укажите ваше отчество. Если отчества нет, отправьте -."
+  },
+  {
+    key: "church",
+    label: "Церковь",
+    prompt: "Укажите название вашей церкви."
+  }
+];
+
+function normalizeProfileText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeBirthDate(value) {
+  const text = normalizeProfileText(value);
+  let day;
+  let month;
+  let year;
+
+  const dotMatch = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (dotMatch) {
+    [, day, month, year] = dotMatch;
+  }
+
+  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!dotMatch && isoMatch) {
+    [, year, month, day] = isoMatch;
+  }
+
+  if (!day || !month || !year) return null;
+
+  const dd = Number(day);
+  const mm = Number(month);
+  const yyyy = Number(year);
+  const date = new Date(Date.UTC(yyyy, mm - 1, dd));
+  const valid = date.getUTCFullYear() === yyyy
+    && date.getUTCMonth() === mm - 1
+    && date.getUTCDate() === dd;
+
+  if (!valid || yyyy < 1900 || yyyy > 2100) return null;
+
+  return [
+    String(yyyy).padStart(4, "0"),
+    String(mm).padStart(2, "0"),
+    String(dd).padStart(2, "0")
+  ].join("-");
+}
+
+function normalizeProfileValue(field, text) {
+  if (field.key === "birth_date") {
+    return normalizeBirthDate(text);
+  }
+
+  if (field.key === "middle_name") {
+    const value = normalizeProfileText(text);
+    return ["-", "нет", "не указано", "без отчества"].includes(value.toLowerCase()) ? "" : value;
+  }
+
+  return normalizeProfileText(text);
+}
+
+function profileSummary(profile) {
+  return [
+    "Проверьте анкету:",
+    "",
+    `Дата рождения: ${profile.birth_date}`,
+    `Фамилия: ${profile.last_name}`,
+    `Имя: ${profile.first_name}`,
+    `Отчество: ${profile.middle_name || "-"}`,
+    `Церковь: ${profile.church}`,
+    "",
+    "Если всё верно, нажмите «Отправить»."
+  ].join("\n");
+}
+
 export class Bot {
   constructor({ config, telegram, store, logger = console }) {
     this.config = config;
@@ -46,6 +140,7 @@ export class Bot {
     this.offset = 0;
     this.stopped = false;
     this.pendingBirthdayEdits = new Map();
+    this.pendingUserProfiles = new Map();
   }
 
   isAdmin(userId) {
@@ -95,17 +190,20 @@ export class Bot {
 
   async handleMessage(message) {
     this.logger.log(`[message] chat=${message.chat?.id} type=${message.chat?.type} from=${message.from?.id} text=${message.text || ""}`);
-    if (await this.handlePendingBirthdayText(message)) return;
-
     const text = message.text || "";
-    if (!text.startsWith("/")) return;
-
-    const command = text.split(/\s+/)[0].split("@")[0].toLowerCase();
+    const command = text.startsWith("/")
+      ? text.split(/\s+/)[0].split("@")[0].toLowerCase()
+      : "";
 
     if (command === "/start") {
       await this.handleStart(message);
       return;
     }
+
+    if (await this.handlePendingBirthdayText(message)) return;
+    if (await this.handlePendingProfileText(message)) return;
+
+    if (!text.startsWith("/")) return;
 
     if (command === "/id") {
       await this.telegram.sendMessage(
@@ -137,10 +235,24 @@ export class Bot {
       await this.store.ensureUserFromTelegram(message.from, privateChatId);
     }
 
+    if (message.chat.type !== "private") {
+      await this.telegram.sendMessage(
+        message.chat.id,
+        "Анкета заполняется в личном чате с ботом. Откройте бота в ЛС и нажмите /start."
+      );
+      return;
+    }
+
+    this.startProfileForm(message.from.id);
     await this.telegram.sendMessage(
       message.chat.id,
-      "Готово. Я привязал ваш Telegram к карточке в Excel. Теперь можно участвовать в регистрациях и получать личные уведомления."
+      [
+        "Готово. Я привязал ваш Telegram к карточке.",
+        "",
+        "Теперь заполните короткую анкету, чтобы администраторы видели корректные данные в таблице."
+      ].join("\n")
     );
+    await this.sendCurrentProfilePrompt(message.chat.id, message.from.id);
   }
 
   async handleEventCommand(message) {
@@ -235,6 +347,11 @@ export class Bot {
       return;
     }
 
+    if (kind === "profile") {
+      await this.handleProfileCallback(callbackQuery);
+      return;
+    }
+
     if (kind !== "vote") return;
 
     const [, eventId, optionIndexRaw] = data.split(":");
@@ -287,6 +404,129 @@ export class Bot {
 
     this.telegram.editMessageReplyMarkup(chatId, messageId, { inline_keyboard: [] })
       .catch((error) => this.logger.warn(`[callback_keyboard_clear] ${error.message}`));
+  }
+
+  startProfileForm(userId) {
+    this.pendingUserProfiles.set(String(userId), {
+      step: 0,
+      data: {},
+      status: "collecting"
+    });
+  }
+
+  async sendCurrentProfilePrompt(chatId, userId) {
+    const state = this.pendingUserProfiles.get(String(userId));
+    if (!state) return;
+
+    const field = PROFILE_FIELDS[state.step];
+    await this.telegram.sendMessage(chatId, [
+      `${state.step + 1}/${PROFILE_FIELDS.length}. ${field.label}`,
+      "",
+      field.prompt,
+      "",
+      "Чтобы отменить заполнение, отправьте /cancel."
+    ].join("\n"));
+  }
+
+  async handlePendingProfileText(message) {
+    const userId = String(message.from?.id || "");
+    const state = this.pendingUserProfiles.get(userId);
+    if (!state || message.chat.type !== "private") return false;
+
+    const text = String(message.text || "").trim();
+    if (!text) return false;
+
+    if (text === "/cancel") {
+      this.pendingUserProfiles.delete(userId);
+      await this.telegram.sendMessage(message.chat.id, "Ок, заполнение анкеты отменено. Вернуться можно командой /start.");
+      return true;
+    }
+
+    if (text.startsWith("/")) return false;
+
+    if (state.status === "confirm") {
+      await this.telegram.sendMessage(message.chat.id, "Анкета уже заполнена. Нажмите «Отправить» или «Заполнить заново» под сводкой.");
+      return true;
+    }
+
+    const field = PROFILE_FIELDS[state.step];
+    const value = normalizeProfileValue(field, text);
+    if (field.key === "birth_date" && !value) {
+      await this.telegram.sendMessage(message.chat.id, "Не получилось распознать дату. Отправьте дату в формате ДД.ММ.ГГГГ, например 22.03.1996.");
+      return true;
+    }
+
+    if (field.key !== "middle_name" && !value) {
+      await this.telegram.sendMessage(message.chat.id, "Это поле нужно заполнить. Отправьте, пожалуйста, значение одним сообщением.");
+      return true;
+    }
+
+    state.data[field.key] = value;
+    state.step += 1;
+
+    if (state.step < PROFILE_FIELDS.length) {
+      await this.sendCurrentProfilePrompt(message.chat.id, userId);
+      return true;
+    }
+
+    state.status = "confirm";
+    await this.telegram.sendMessage(message.chat.id, profileSummary(state.data), {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Отправить", callback_data: "profile:submit" }],
+          [{ text: "Заполнить заново", callback_data: "profile:restart" }]
+        ]
+      }
+    });
+    return true;
+  }
+
+  async handleProfileCallback(callbackQuery) {
+    const [, action] = String(callbackQuery.data || "").split(":");
+    const userId = String(callbackQuery.from?.id || "");
+    const state = this.pendingUserProfiles.get(userId);
+
+    if (action === "restart") {
+      this.startProfileForm(userId);
+      this.clearCallbackKeyboard(callbackQuery);
+      await this.telegram.answerCallbackQuery(callbackQuery.id, "Заполняем заново.");
+      await this.sendCurrentProfilePrompt(callbackQuery.message.chat.id, userId);
+      return;
+    }
+
+    if (action !== "submit") {
+      await this.telegram.answerCallbackQuery(callbackQuery.id, "Неизвестное действие.");
+      return;
+    }
+
+    if (!state || state.status !== "confirm") {
+      await this.telegram.answerCallbackQuery(callbackQuery.id, "Анкета не найдена. Нажмите /start и заполните заново.");
+      return;
+    }
+
+    const missing = PROFILE_FIELDS
+      .filter((field) => field.key !== "middle_name")
+      .filter((field) => !state.data[field.key]);
+    if (missing.length) {
+      await this.telegram.answerCallbackQuery(callbackQuery.id, "В анкете не хватает данных. Заполните заново.");
+      return;
+    }
+
+    await this.telegram.answerCallbackQuery(callbackQuery.id, "Сохраняю анкету.");
+    this.clearCallbackKeyboard(callbackQuery);
+
+    try {
+      await this.store.updateUserProfile({
+        telegramUser: callbackQuery.from,
+        privateChatId: String(callbackQuery.message.chat.id),
+        profile: state.data
+      });
+      this.pendingUserProfiles.delete(userId);
+      await this.telegram.sendMessage(callbackQuery.message.chat.id, "✅ Спасибо! Анкета сохранена в вашей карточке.");
+    } catch (error) {
+      this.logger.error("[profile_submit]", error);
+      await this.telegram.sendMessage(callbackQuery.message.chat.id, "Не удалось сохранить анкету. Администратор уже увидит ошибку в логах.");
+    }
   }
 
   async handleBirthdayCallback(callbackQuery) {
@@ -442,7 +682,7 @@ export class Bot {
   helpText() {
     return [
       "Команды:",
-      "/start - привязать Telegram к карточке Excel",
+      "/start - привязать Telegram и заполнить анкету",
       "/id - показать chat_id и user_id",
       "/event Название | даты | описание | Еду,Не еду,Пока не знаю - создать регистрацию",
       "/birthdays - создать черновики поздравлений и отправить суперадмину на подтверждение"
