@@ -442,7 +442,10 @@ export class Bot {
 
     const [, eventId, optionIndexRaw] = data.split(":");
     await this.telegram.answerCallbackQuery(callbackQuery.id, "✅ Спасибо! Ваш голос принят.");
+    this.finishVoteRegistration({ callbackQuery, eventId, optionIndexRaw });
+  }
 
+  async finishVoteRegistration({ callbackQuery, eventId, optionIndexRaw }) {
     try {
       const event = await this.store.getEvent(eventId);
       if (!event) {
