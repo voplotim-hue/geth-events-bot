@@ -242,11 +242,7 @@ export class Bot {
     this.startProfileForm(message.from.id);
     await this.telegram.sendMessage(
       message.chat.id,
-      [
-        "Готово. Я привязал ваш Telegram к карточке.",
-        "",
-        "Теперь заполните короткую анкету, чтобы администраторы видели корректные данные в таблице."
-      ].join("\n")
+      "Привет, теперь ты официально присоединился к группе GethTeens и наше взаимодействие станет намного удобнее! Заполни короткую анкету, чтоб администраторы видели необходимые данные для дальнейшей регистрации на всех запланированных мероприятиях."
     );
     await this.sendCurrentProfilePrompt(message.chat.id, message.from.id);
   }
