@@ -13,6 +13,16 @@ function callbackData(eventId, optionIndex) {
   return `vote:${eventId}:${optionIndex}`;
 }
 
+const ADMIN_CREATE_EVENT_BUTTON = "Создать мероприятие";
+
+function adminReplyKeyboard() {
+  return {
+    keyboard: [[{ text: ADMIN_CREATE_EVENT_BUTTON }]],
+    resize_keyboard: true,
+    is_persistent: true
+  };
+}
+
 function eventText({ title, dates, description }) {
   const lines = [title];
   if (dates) lines.push(`Даты: ${dates}`);
@@ -252,6 +262,11 @@ export class Bot {
       return;
     }
 
+    if (text === ADMIN_CREATE_EVENT_BUTTON) {
+      await this.handleNewEventCommand(message);
+      return;
+    }
+
     if (await this.handlePendingEventText(message)) return;
     if (await this.handlePendingBirthdayText(message)) return;
     if (await this.handlePendingProfileText(message)) return;
@@ -304,7 +319,10 @@ export class Bot {
     this.startProfileForm(message.from.id);
     await this.telegram.sendMessage(
       message.chat.id,
-      "Привет, теперь ты официально присоединился к группе GethTeens и наше взаимодействие станет намного удобнее! Заполни короткую анкету, чтоб администраторы видели необходимые данные для дальнейшей регистрации на всех запланированных мероприятиях."
+      "Привет, теперь ты официально присоединился к группе GethTeens и наше взаимодействие станет намного удобнее! Заполни короткую анкету, чтоб администраторы видели необходимые данные для дальнейшей регистрации на всех запланированных мероприятиях.",
+      this.canManageEvents(message.from.id)
+        ? { reply_markup: adminReplyKeyboard() }
+        : {}
     );
     await this.sendCurrentProfilePrompt(message.chat.id, message.from.id);
     if (this.canManageEvents(message.from.id)) {
@@ -384,12 +402,8 @@ export class Bot {
   }
 
   async sendAdminPanel(chatId) {
-    await this.telegram.sendMessage(chatId, "Панель администратора:", {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "Создать регистрацию на мероприятие", callback_data: "event:new" }]
-        ]
-      }
+    await this.telegram.sendMessage(chatId, "Кнопка администратора закреплена внизу чата.", {
+      reply_markup: adminReplyKeyboard()
     });
   }
 
@@ -960,6 +974,7 @@ export class Bot {
       "/start - привязать Telegram и заполнить анкету",
       "/id - показать chat_id и user_id",
       "/new_event - создать регистрацию на мероприятие через мастер",
+      `"${ADMIN_CREATE_EVENT_BUTTON}" - постоянная кнопка администратора для создания мероприятия`,
       "/event Название | даты | описание | Еду,Не еду,Пока не знаю - создать регистрацию",
       "/birthdays - создать черновики поздравлений и отправить суперадмину на подтверждение"
     ].join("\n");
