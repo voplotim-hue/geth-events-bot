@@ -44,19 +44,9 @@ const PROFILE_FIELDS = [
     prompt: "Укажите дату рождения в формате ДД.ММ.ГГГГ, например 22.03.1996."
   },
   {
-    key: "last_name",
-    label: "Фамилия",
-    prompt: "Укажите вашу фамилию."
-  },
-  {
-    key: "first_name",
-    label: "Имя",
-    prompt: "Укажите ваше имя."
-  },
-  {
-    key: "middle_name",
-    label: "Отчество",
-    prompt: "Укажите ваше отчество. Если отчества нет, отправьте -."
+    key: "full_name",
+    label: "Фамилия Имя Отчество",
+    prompt: "Укажите фамилию, имя и отчество одной строкой, например: Иванов Иван Иванович. Если отчества нет, укажите только фамилию и имя."
   },
   {
     key: "church",
@@ -109,12 +99,18 @@ function normalizeProfileValue(field, text) {
     return normalizeBirthDate(text);
   }
 
-  if (field.key === "middle_name") {
-    const value = normalizeProfileText(text);
-    return ["-", "нет", "не указано", "без отчества"].includes(value.toLowerCase()) ? "" : value;
-  }
-
   return normalizeProfileText(text);
+}
+
+function parseFullName(value) {
+  const parts = normalizeProfileText(value).split(" ").filter(Boolean);
+  if (parts.length < 2) return null;
+
+  return {
+    last_name: parts[0],
+    first_name: parts[1],
+    middle_name: parts.slice(2).join(" ")
+  };
 }
 
 function profileSummary(profile) {
@@ -456,12 +452,22 @@ export class Bot {
       return true;
     }
 
-    if (field.key !== "middle_name" && !value) {
+    if (!value) {
       await this.telegram.sendMessage(message.chat.id, "Это поле нужно заполнить. Отправьте, пожалуйста, значение одним сообщением.");
       return true;
     }
 
-    state.data[field.key] = value;
+    if (field.key === "full_name") {
+      const parsed = parseFullName(value);
+      if (!parsed) {
+        await this.telegram.sendMessage(message.chat.id, "Не получилось распознать ФИО. Отправьте минимум фамилию и имя, например: Иванов Иван Иванович.");
+        return true;
+      }
+
+      Object.assign(state.data, parsed);
+    } else {
+      state.data[field.key] = value;
+    }
     state.step += 1;
 
     if (state.step < PROFILE_FIELDS.length) {
