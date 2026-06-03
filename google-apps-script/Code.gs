@@ -5,6 +5,87 @@ const BOT_SECRET = 'replace_with_GOOGLE_APPS_SCRIPT_SECRET';
 const USERS_SHEET_NAME = 'Users';
 const ROLE_HEADER = 'Роль';
 const ROLE_VALUES = ['Участник', 'Помощник', 'Админ', 'Гость'];
+const SHEET_DISPLAY_HEADERS = {
+  Users: [
+    'Telegram ID',
+    'Username',
+    'Фамилия',
+    'Имя',
+    'Отчество',
+    'Дата рождения',
+    'Церковь',
+    'Пол',
+    'Согласие родителей',
+    'Справка',
+    'ID личного чата',
+    'Активен',
+    'Заметки',
+    'Обновлено',
+    'Роль'
+  ],
+  Events: [
+    'ID мероприятия',
+    'Название',
+    'Даты',
+    'Описание',
+    'Варианты ответа',
+    'Статус',
+    'ID группы',
+    'ID сообщения',
+    'Создано',
+    'Обновлено'
+  ],
+  Registrations: [
+    'ID мероприятия',
+    'Мероприятие',
+    'Telegram ID',
+    'Username',
+    'ФИО',
+    'Ответ',
+    'Предыдущий ответ',
+    'Пометка изменения',
+    'Время ответа',
+    'ID сообщения',
+    'Обновлено'
+  ],
+  EventRoster: [
+    'ID мероприятия',
+    'ФИ',
+    'Сдал',
+    'Церковь',
+    'Дата рождения',
+    'Примечание',
+    'Пол',
+    'Согласие родителей',
+    'Справка',
+    'Ответ',
+    'Статус решения',
+    'Username',
+    'Telegram ID',
+    'Время ответа',
+    'Роль'
+  ],
+  BirthdayLog: [
+    'Дата',
+    'Telegram ID',
+    'Username',
+    'ФИО',
+    'Текст поздравления',
+    'Статус согласования',
+    'Отправлено в ЛС',
+    'Отправлено в группу',
+    'Согласовал',
+    'Время согласования',
+    'Время отправки',
+    'Заметки'
+  ],
+  BirthdayTemplates: [
+    'Место Писания',
+    'Стих',
+    'Пожелание',
+    'Активен'
+  ]
+};
 const ROLE_STYLES = {
   'Админ': {
     rank: 1,
@@ -59,6 +140,7 @@ function onOpen() {
     .addItem('Назначить гостем', 'assignGuestRole')
     .addItem('Назначить админом в таблице', 'assignAdminRole')
     .addSeparator()
+    .addItem('Настроить русский вид таблицы', 'setupSpreadsheetView')
     .addItem('Обновить порядок и цвета ролей', 'applyUsersRoleView')
     .addToUi();
 }
@@ -80,8 +162,33 @@ function onEdit(e) {
 function roleColumnIndex(sheet) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
     .map((header) => String(header || '').trim());
-  const index = headers.indexOf(ROLE_HEADER);
+  const index = headers.findIndex((header) => header === ROLE_HEADER || header === 'role');
   return index === -1 ? 0 : index + 1;
+}
+
+function applyHeaderStyle(sheet) {
+  sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    .setFontWeight('bold')
+    .setBackground('#0f6b85')
+    .setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
+}
+
+function setupSheetHeaders() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+  Object.entries(SHEET_DISPLAY_HEADERS).forEach(([sheetName, headers]) => {
+    const sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) return;
+
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    applyHeaderStyle(sheet);
+  });
+}
+
+function setupSpreadsheetView() {
+  setupSheetHeaders();
+  applyUsersRoleView();
 }
 
 function prepareRoleColumn() {
@@ -98,10 +205,7 @@ function prepareRoleColumn() {
     .build();
 
   sheet.getRange(2, column, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
-  sheet.getRange(1, 1, 1, sheet.getLastColumn())
-    .setFontWeight('bold')
-    .setBackground('#0f6b85')
-    .setFontColor('#ffffff');
+  applyHeaderStyle(sheet);
   return column;
 }
 
@@ -262,6 +366,11 @@ function doPost(e) {
 
     if (body.action === 'applyRoleView') {
       applyUsersRoleView();
+      return jsonResponse({ ok: true, result: { applied: true } });
+    }
+
+    if (body.action === 'setupSpreadsheetView') {
+      setupSpreadsheetView();
       return jsonResponse({ ok: true, result: { applied: true } });
     }
 
