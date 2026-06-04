@@ -235,7 +235,7 @@ docker compose down
 `Users` - карточки пользователей:
 
 ```text
-telegram_user_id | username | last_name | first_name | middle_name | birth_date | church | gender | parent_consent | medical_certificate | private_chat_id | is_active | notes | updated_at | role
+telegram_user_id | username | last_name | first_name | middle_name | role | birth_date | church | gender | parent_consent | medical_certificate | private_chat_id | is_active | notes | updated_at
 ```
 
 `Events` - мероприятия:

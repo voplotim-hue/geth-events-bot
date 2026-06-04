@@ -12,6 +12,7 @@ const SHEET_DISPLAY_HEADERS = {
     'Фамилия',
     'Имя',
     'Отчество',
+    'Роль',
     'Дата рождения',
     'Церковь',
     'Пол',
@@ -20,8 +21,7 @@ const SHEET_DISPLAY_HEADERS = {
     'ID личного чата',
     'Активен',
     'Заметки',
-    'Обновлено',
-    'Роль'
+    'Обновлено'
   ],
   Events: [
     'ID мероприятия',
@@ -85,6 +85,23 @@ const SHEET_DISPLAY_HEADERS = {
     'Пожелание',
     'Активен'
   ]
+};
+const USER_HEADER_ALIASES = {
+  telegram_user_id: 'Telegram ID',
+  username: 'Username',
+  last_name: 'Фамилия',
+  first_name: 'Имя',
+  middle_name: 'Отчество',
+  role: 'Роль',
+  birth_date: 'Дата рождения',
+  church: 'Церковь',
+  gender: 'Пол',
+  parent_consent: 'Согласие родителей',
+  medical_certificate: 'Справка',
+  private_chat_id: 'ID личного чата',
+  is_active: 'Активен',
+  notes: 'Заметки',
+  updated_at: 'Обновлено'
 };
 const ROLE_STYLES = {
   'Админ': {
@@ -181,6 +198,11 @@ function setupSheetHeaders() {
     const sheet = spreadsheet.getSheetByName(sheetName);
     if (!sheet) return;
 
+    if (sheetName === USERS_SHEET_NAME) {
+      reorderUsersSheet(sheet, headers);
+      return;
+    }
+
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     applyHeaderStyle(sheet);
   });
@@ -189,6 +211,34 @@ function setupSheetHeaders() {
 function setupSpreadsheetView() {
   setupSheetHeaders();
   applyUsersRoleView();
+}
+
+function normalizeUserHeader(header) {
+  const value = String(header || '').trim();
+  return USER_HEADER_ALIASES[value] || value;
+}
+
+function reorderUsersSheet(sheet, headers) {
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  const values = sheet.getDataRange().getValues();
+  const oldHeaders = (values[0] || []).map(normalizeUserHeader);
+  const dataRows = values.slice(1).filter((row) => row.some((cell) => cell !== ''));
+  const nextRows = dataRows.map((row) => {
+    const byHeader = {};
+    oldHeaders.forEach((header, index) => {
+      byHeader[header] = row[index] === null ? '' : row[index];
+    });
+    return headers.map((header) => byHeader[header] ?? '');
+  });
+  const width = Math.max(sheet.getLastColumn(), headers.length, 1);
+  const height = Math.max(sheet.getLastRow(), nextRows.length + 1, 1);
+
+  sheet.getRange(1, 1, height, width).clearContent().clearDataValidations();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (nextRows.length) {
+    sheet.getRange(2, 1, nextRows.length, headers.length).setValues(nextRows);
+  }
+  applyHeaderStyle(sheet);
 }
 
 function prepareRoleColumn() {
@@ -266,6 +316,7 @@ function applyUsersRoleView() {
 
   applyRoleColors(sheet, roleColumn);
   sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(roleColumn);
 }
 
 function setSelectedUsersRole(role) {

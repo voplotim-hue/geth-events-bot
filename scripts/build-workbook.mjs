@@ -130,6 +130,7 @@ const sheets = [
       "last_name",
       "first_name",
       "middle_name",
+      "role",
       "birth_date",
       "church",
       "gender",
@@ -138,8 +139,7 @@ const sheets = [
       "private_chat_id",
       "is_active",
       "notes",
-      "updated_at",
-      "role"
+      "updated_at"
     ],
     rows: seedUsers
   },

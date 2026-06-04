@@ -10,6 +10,7 @@ const USER_COLUMNS = [
   "last_name",
   "first_name",
   "middle_name",
+  "role",
   "birth_date",
   "church",
   "gender",
@@ -18,8 +19,7 @@ const USER_COLUMNS = [
   "private_chat_id",
   "is_active",
   "notes",
-  "updated_at",
-  "role"
+  "updated_at"
 ];
 
 const EVENT_COLUMNS = [
