@@ -337,6 +337,12 @@ export class GoogleSheetsStore {
     return rows.find((row) => String(row.event_id) === String(eventId) && String(row.status || "active") !== "closed");
   }
 
+  async listActiveEvents() {
+    const sheetName = this.config.sheets.events;
+    const { rows } = await this.readTable(sheetName);
+    return rows.filter((row) => String(row.status || "active") !== "closed");
+  }
+
   async upsertRegistration({ event, telegramUser, answer, sourceMessageId }) {
     const user = await this.ensureUserFromTelegram(telegramUser);
     const sheetName = this.config.sheets.registrations;

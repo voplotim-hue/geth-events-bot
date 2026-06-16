@@ -339,6 +339,12 @@ export class ExcelStore {
     return rows.find((row) => String(row.event_id) === String(eventId) && String(row.status || "active") !== "closed");
   }
 
+  async listActiveEvents() {
+    const tableName = this.config.tables.events;
+    const { rows } = await this.readTable(tableName);
+    return rows.filter((row) => String(row.status || "active") !== "closed");
+  }
+
   async upsertRegistration({ event, telegramUser, answer, sourceMessageId }) {
     const user = await this.ensureUserFromTelegram(telegramUser);
     const tableName = this.config.tables.registrations;

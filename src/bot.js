@@ -9,15 +9,30 @@ function stripCommand(text) {
   return text.replace(/^\/[a-zA-Z0-9_]+(?:@[a-zA-Z0-9_]+)?\s*/, "").trim();
 }
 
+function parseStartEventId(text) {
+  const payload = stripCommand(text);
+  const match = /^event_([a-zA-Z0-9_-]+)$/.exec(payload);
+  return match ? match[1] : "";
+}
+
 function callbackData(eventId, optionIndex) {
   return `vote:${eventId}:${optionIndex}`;
 }
 
 const ADMIN_CREATE_EVENT_BUTTON = "Создать мероприятие";
+const ACTIVE_EVENTS_BUTTON = "Актуальные мероприятия";
 
 function adminReplyKeyboard() {
   return {
-    keyboard: [[{ text: ADMIN_CREATE_EVENT_BUTTON }]],
+    keyboard: [[{ text: ADMIN_CREATE_EVENT_BUTTON }], [{ text: ACTIVE_EVENTS_BUTTON }]],
+    resize_keyboard: true,
+    is_persistent: true
+  };
+}
+
+function userReplyKeyboard() {
+  return {
+    keyboard: [[{ text: ACTIVE_EVENTS_BUTTON }]],
     resize_keyboard: true,
     is_persistent: true
   };
@@ -29,6 +44,24 @@ function eventText({ title, dates, description }) {
   if (description) lines.push("", description);
   lines.push("", "Выберите вариант:");
   return lines.join("\n");
+}
+
+function eventOptions(event) {
+  return String(event.options || "")
+    .split("|")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function eventInlineKeyboard(event) {
+  return eventOptions(event).map((option, index) => [{
+    text: option,
+    callback_data: callbackData(event.event_id, index)
+  }]);
+}
+
+function eventShareLink(botUsername, eventId) {
+  return `https://t.me/${botUsername}?start=event_${encodeURIComponent(eventId)}`;
 }
 
 function parseEventCommand(text, defaultOptions) {
@@ -160,6 +193,11 @@ function profileSummary(profile) {
   ].join("\n");
 }
 
+function isProfileComplete(user) {
+  return ["birth_date", "last_name", "first_name", "church"]
+    .every((key) => String(user?.[key] || "").trim());
+}
+
 function normalizeOptionalEventValue(value) {
   const text = normalizeProfileText(value);
   return text === "-" ? "" : text;
@@ -199,6 +237,7 @@ export class Bot {
     this.pendingBirthdayEdits = new Map();
     this.pendingUserProfiles = new Map();
     this.pendingEventDrafts = new Map();
+    this.pendingLinkedEvents = new Map();
   }
 
   isAdmin(userId) {
@@ -267,6 +306,11 @@ export class Bot {
       return;
     }
 
+    if (text === ACTIVE_EVENTS_BUTTON) {
+      await this.handleActiveEventsCommand(message);
+      return;
+    }
+
     if (await this.handlePendingEventText(message)) return;
     if (await this.handlePendingBirthdayText(message)) return;
     if (await this.handlePendingProfileText(message)) return;
@@ -283,6 +327,11 @@ export class Bot {
 
     if (command === "/help") {
       await this.telegram.sendMessage(message.chat.id, this.helpText());
+      return;
+    }
+
+    if (command === "/events") {
+      await this.handleActiveEventsCommand(message);
       return;
     }
 
@@ -303,10 +352,11 @@ export class Bot {
 
   async handleStart(message) {
     const privateChatId = message.chat.type === "private" ? String(message.chat.id) : "";
+    const linkedEventId = parseStartEventId(message.text || "");
 
-    if (this.store.enabled) {
-      await this.store.ensureUserFromTelegram(message.from, privateChatId);
-    }
+    const user = this.store.enabled
+      ? await this.store.ensureUserFromTelegram(message.from, privateChatId)
+      : null;
 
     if (message.chat.type !== "private") {
       await this.telegram.sendMessage(
@@ -316,18 +366,106 @@ export class Bot {
       return;
     }
 
+    if (linkedEventId) {
+      this.pendingLinkedEvents.set(String(message.from.id), linkedEventId);
+    }
+
+    if (linkedEventId && isProfileComplete(user)) {
+      await this.telegram.sendMessage(
+        message.chat.id,
+        "Открываю регистрацию на мероприятие.",
+        this.canManageEvents(message.from.id)
+          ? { reply_markup: adminReplyKeyboard() }
+          : { reply_markup: userReplyKeyboard() }
+      );
+      this.pendingLinkedEvents.delete(String(message.from.id));
+      await this.sendEventRegistrationToPrivateChat(message.chat.id, linkedEventId);
+      return;
+    }
+
     this.startProfileForm(message.from.id);
     await this.telegram.sendMessage(
       message.chat.id,
-      "Привет, теперь ты официально присоединился к группе GethTeens и наше взаимодействие станет намного удобнее! Заполни короткую анкету, чтоб администраторы видели необходимые данные для дальнейшей регистрации на всех запланированных мероприятиях.",
+      linkedEventId
+        ? "Привет! Чтобы зарегистрироваться на мероприятие, заполни короткую анкету. После сохранения данных я сразу покажу голосование."
+        : "Привет, теперь ты официально присоединился к группе GethTeens и наше взаимодействие станет намного удобнее! Заполни короткую анкету, чтоб администраторы видели необходимые данные для дальнейшей регистрации на всех запланированных мероприятиях.",
       this.canManageEvents(message.from.id)
         ? { reply_markup: adminReplyKeyboard() }
-        : {}
+        : { reply_markup: userReplyKeyboard() }
     );
     await this.sendCurrentProfilePrompt(message.chat.id, message.from.id);
     if (this.canManageEvents(message.from.id)) {
       await this.sendAdminPanel(message.chat.id);
     }
+  }
+
+  async handleActiveEventsCommand(message) {
+    if (message.chat.type !== "private") {
+      await this.telegram.sendMessage(
+        message.chat.id,
+        "Актуальные регистрации удобнее смотреть в личном чате с ботом. Откройте бота в ЛС и нажмите «Актуальные мероприятия»."
+      );
+      return;
+    }
+
+    if (!this.store.enabled) {
+      await this.telegram.sendMessage(message.chat.id, "Таблица не настроена. Администратор должен проверить .env.");
+      return;
+    }
+
+    const user = await this.store.ensureUserFromTelegram(message.from, String(message.chat.id));
+    if (!isProfileComplete(user)) {
+      this.startProfileForm(message.from.id);
+      await this.telegram.sendMessage(
+        message.chat.id,
+        "Сначала заполни короткую анкету, чтобы регистрация попала в таблицу корректно.",
+        { reply_markup: this.canManageEvents(message.from.id) ? adminReplyKeyboard() : userReplyKeyboard() }
+      );
+      await this.sendCurrentProfilePrompt(message.chat.id, message.from.id);
+      return;
+    }
+
+    const events = await this.store.listActiveEvents();
+    if (!events.length) {
+      await this.telegram.sendMessage(message.chat.id, "Сейчас нет активных регистраций.");
+      return;
+    }
+
+    await this.telegram.sendMessage(message.chat.id, "Актуальные регистрации:");
+    for (const event of events) {
+      const options = eventOptions(event);
+      if (options.length < 2) continue;
+      await this.telegram.sendMessage(message.chat.id, eventText({
+        title: event.title,
+        dates: event.dates,
+        description: event.description
+      }), {
+        reply_markup: { inline_keyboard: eventInlineKeyboard(event) }
+      });
+    }
+  }
+
+  async sendEventRegistrationToPrivateChat(chatId, eventId) {
+    const event = await this.store.getEvent(eventId);
+    if (!event) {
+      await this.telegram.sendMessage(chatId, "Регистрация не найдена или уже закрыта.");
+      return false;
+    }
+
+    const options = eventOptions(event);
+    if (options.length < 2) {
+      await this.telegram.sendMessage(chatId, "У этой регистрации пока нет вариантов ответа.");
+      return false;
+    }
+
+    await this.telegram.sendMessage(chatId, eventText({
+      title: event.title,
+      dates: event.dates,
+      description: event.description
+    }), {
+      reply_markup: { inline_keyboard: eventInlineKeyboard(event) }
+    });
+    return true;
   }
 
   async handleEventCommand(message) {
@@ -660,7 +798,12 @@ export class Bot {
       this.pendingEventDrafts.delete(userId);
       await this.telegram.sendMessage(
         callbackQuery.message.chat.id,
-        `✅ Регистрация опубликована. event_id: ${result.eventId}`
+        [
+          `✅ Регистрация опубликована. event_id: ${result.eventId}`,
+          "",
+          "Ссылка для регистрации через ЛС:",
+          result.shareLink
+        ].join("\n")
       );
       await this.sendAdminPanel(callbackQuery.message.chat.id);
     } catch (error) {
@@ -687,7 +830,11 @@ export class Bot {
       messageId: sent.message_id
     });
 
-    return { eventId, messageId: sent.message_id };
+    return {
+      eventId,
+      messageId: sent.message_id,
+      shareLink: eventShareLink(this.config.botUsername, eventId)
+    };
   }
 
   startProfileForm(userId) {
@@ -816,6 +963,18 @@ export class Bot {
       });
       this.pendingUserProfiles.delete(userId);
       await this.telegram.sendMessage(callbackQuery.message.chat.id, "Спасибо! Твои данные сохранены");
+      const linkedEventId = this.pendingLinkedEvents.get(userId);
+      if (linkedEventId) {
+        this.pendingLinkedEvents.delete(userId);
+        await this.telegram.sendMessage(callbackQuery.message.chat.id, "Теперь выбери вариант регистрации:");
+        await this.sendEventRegistrationToPrivateChat(callbackQuery.message.chat.id, linkedEventId);
+      } else {
+        await this.telegram.sendMessage(
+          callbackQuery.message.chat.id,
+          "Чтобы посмотреть открытые регистрации, нажми «Актуальные мероприятия».",
+          { reply_markup: this.canManageEvents(callbackQuery.from.id) ? adminReplyKeyboard() : userReplyKeyboard() }
+        );
+      }
     } catch (error) {
       this.logger.error("[profile_submit]", error);
       await this.telegram.sendMessage(callbackQuery.message.chat.id, "Не удалось сохранить анкету. Администратор уже увидит ошибку в логах.");

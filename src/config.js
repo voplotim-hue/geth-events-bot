@@ -129,6 +129,7 @@ export function loadConfig(env = process.env) {
 
   return {
     telegramToken,
+    botUsername: String(env.TELEGRAM_BOT_USERNAME || "GethEvents_bot").replace(/^@/, ""),
     adminUserIds,
     groupChatId: env.GROUP_CHAT_ID || "",
     timeZone: env.TIMEZONE || "Europe/Minsk",
