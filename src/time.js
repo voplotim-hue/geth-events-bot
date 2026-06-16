@@ -57,3 +57,40 @@ export function parseBirthday(value) {
 
   return null;
 }
+
+export function formatBirthDate(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const asText = (displayValue) => `'${displayValue}`;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = Math.round((value - 25569) * 86400 * 1000);
+    const date = new Date(ms);
+    return asText([
+      String(date.getUTCDate()).padStart(2, "0"),
+      String(date.getUTCMonth() + 1).padStart(2, "0"),
+      String(date.getUTCFullYear()).padStart(4, "0")
+    ].join("."));
+  }
+
+  const raw = String(value).trim();
+  let match = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:T.*)?$/.exec(raw);
+  if (match) {
+    return asText([
+      String(Number(match[3])).padStart(2, "0"),
+      String(Number(match[2])).padStart(2, "0"),
+      String(Number(match[1])).padStart(4, "0")
+    ].join("."));
+  }
+
+  match = /^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/.exec(raw);
+  if (match) {
+    const year = match[3].length === 2 ? `20${match[3]}` : match[3];
+    return asText([
+      String(Number(match[1])).padStart(2, "0"),
+      String(Number(match[2])).padStart(2, "0"),
+      String(Number(year)).padStart(4, "0")
+    ].join("."));
+  }
+
+  return raw;
+}

@@ -1,4 +1,4 @@
-import { isoNow, parseBirthday } from "./time.js";
+import { formatBirthDate, isoNow, parseBirthday } from "./time.js";
 import { normalizeBlessingTemplates } from "./blessings.js";
 import { isGuestRole, resolveProfileRole } from "./roles.js";
 
@@ -403,7 +403,7 @@ export class AppsScriptStore {
       "ФИ": registration.full_name || fullName(user) || registration.username,
       "Сдал": "",
       "Церковь": user.church || "",
-      "Дата рождения": user.birth_date || "",
+      "Дата рождения": formatBirthDate(user.birth_date),
       "примечание": user.notes || "",
       "Пол": user.gender || "",
       "Согласие родителей": user.parent_consent || "",
