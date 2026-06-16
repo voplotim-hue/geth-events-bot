@@ -130,6 +130,10 @@ const ROLE_STYLES = {
     fontColor: '#202124'
   }
 };
+const DECISION_CHANGED_TEXT = 'изменил решение';
+const DECISION_CHANGED_ROW_BACKGROUND = '#fde7e9';
+const DECISION_CHANGED_CELL_BACKGROUND = '#d93025';
+const DECISION_CHANGED_CELL_FONT = '#ffffff';
 
 function jsonResponse(payload) {
   return ContentService
@@ -159,6 +163,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Настроить русский вид таблицы', 'setupSpreadsheetView')
     .addItem('Обновить порядок и цвета ролей', 'applyUsersRoleView')
+    .addItem('Подсветить изменения решений', 'applyAllEventRosterHighlights')
     .addToUi();
 }
 
@@ -195,6 +200,56 @@ function applyEventRosterSheetStyle(sheet) {
   applyHeaderStyle(sheet);
   sheet.setFrozenColumns(2);
   sheet.autoResizeColumns(1, Math.max(sheet.getLastColumn(), 1));
+  applyDecisionChangeHighlights(sheet);
+}
+
+function isEventRosterSheetName(sheetName) {
+  return sheetName === 'EventRoster' || String(sheetName || '').startsWith('Мероприятие - ');
+}
+
+function eventRosterHeaderIndex(sheet, headerName) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+    .map((header) => String(header || '').trim());
+  return headers.findIndex((header) => header === headerName) + 1;
+}
+
+function applyDecisionChangeHighlights(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (lastRow < 2 || lastColumn < 1) return;
+
+  const statusColumn = eventRosterHeaderIndex(sheet, 'Статус решения');
+  if (!statusColumn) return;
+
+  const statusRange = sheet.getRange(2, statusColumn, lastRow - 1, 1);
+  const statuses = statusRange.getValues();
+  const rowBackgrounds = [];
+  const statusBackgrounds = [];
+  const statusFontColors = [];
+  const statusFontWeights = [];
+
+  statuses.forEach(([status]) => {
+    const changed = String(status || '').trim().toLowerCase() === DECISION_CHANGED_TEXT;
+    rowBackgrounds.push(Array.from({ length: lastColumn }, () => changed ? DECISION_CHANGED_ROW_BACKGROUND : '#ffffff'));
+    statusBackgrounds.push([changed ? DECISION_CHANGED_CELL_BACKGROUND : '#ffffff']);
+    statusFontColors.push([changed ? DECISION_CHANGED_CELL_FONT : '#202124']);
+    statusFontWeights.push([changed ? 'bold' : 'normal']);
+  });
+
+  sheet.getRange(2, 1, lastRow - 1, lastColumn).setBackgrounds(rowBackgrounds);
+  statusRange
+    .setBackgrounds(statusBackgrounds)
+    .setFontColors(statusFontColors)
+    .setFontWeights(statusFontWeights);
+}
+
+function applyAllEventRosterHighlights() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  spreadsheet.getSheets()
+    .filter((sheet) => isEventRosterSheetName(sheet.getName()))
+    .forEach((sheet) => {
+      applyEventRosterSheetStyle(sheet);
+    });
 }
 
 function setupSheetHeaders() {
@@ -210,13 +265,18 @@ function setupSheetHeaders() {
     }
 
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    applyHeaderStyle(sheet);
+    if (sheetName === 'EventRoster') {
+      applyEventRosterSheetStyle(sheet);
+    } else {
+      applyHeaderStyle(sheet);
+    }
   });
 }
 
 function setupSpreadsheetView() {
   setupSheetHeaders();
   applyUsersRoleView();
+  applyAllEventRosterHighlights();
 }
 
 function normalizeUserHeader(header) {
@@ -390,6 +450,9 @@ function appendRow(sheetName, values) {
   if (sheetName === USERS_SHEET_NAME) {
     applyUsersRoleView();
   }
+  if (isEventRosterSheetName(sheetName)) {
+    applyEventRosterSheetStyle(sheet);
+  }
   return { rowNumber: sheet.getLastRow() };
 }
 
@@ -398,6 +461,9 @@ function updateRow(sheetName, rowNumber, values) {
   sheet.getRange(Number(rowNumber), 1, 1, values.length).setValues([values]);
   if (sheetName === USERS_SHEET_NAME) {
     applyUsersRoleView();
+  }
+  if (isEventRosterSheetName(sheetName)) {
+    applyEventRosterSheetStyle(sheet);
   }
   return { rowNumber: Number(rowNumber) };
 }
@@ -458,6 +524,11 @@ function doPost(e) {
 
     if (body.action === 'setupSpreadsheetView') {
       setupSpreadsheetView();
+      return jsonResponse({ ok: true, result: { applied: true } });
+    }
+
+    if (body.action === 'applyEventRosterHighlights') {
+      applyAllEventRosterHighlights();
       return jsonResponse({ ok: true, result: { applied: true } });
     }
 
