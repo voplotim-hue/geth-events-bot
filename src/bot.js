@@ -457,7 +457,7 @@ export class Bot {
     const [, eventId, optionIndexRaw] = data.split(":");
     await this.telegram.answerCallbackQuery(
       callbackQuery.id,
-      "✅ Спасибо! Ваш голос принят.\n\nПовторно нажимать не нужно. Если вы поменяете вариант, таблица обновится.",
+      "✅ Спасибо! Ваш голос принят.\n\nПовторно нажимать не нужно.",
       { show_alert: true }
     );
     this.finishVoteRegistration({ callbackQuery, eventId, optionIndexRaw });
