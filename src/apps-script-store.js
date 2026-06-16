@@ -199,7 +199,8 @@ function sheetKey(config, sheetName) {
 }
 
 function normalizeTableHeaders(config, sheetName, table) {
-  const key = sheetKey(config, sheetName);
+  const key = sheetKey(config, sheetName)
+    || (String(sheetName || "").startsWith("Мероприятие - ") ? "eventRoster" : "");
   const aliases = COLUMN_ALIASES[key];
   if (!aliases) return table;
 
