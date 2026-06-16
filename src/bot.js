@@ -815,7 +815,7 @@ export class Bot {
         profile: state.data
       });
       this.pendingUserProfiles.delete(userId);
-      await this.telegram.sendMessage(callbackQuery.message.chat.id, "✅ Спасибо! Анкета сохранена в вашей карточке.");
+      await this.telegram.sendMessage(callbackQuery.message.chat.id, "Спасибо! Твои данные сохранены");
     } catch (error) {
       this.logger.error("[profile_submit]", error);
       await this.telegram.sendMessage(callbackQuery.message.chat.id, "Не удалось сохранить анкету. Администратор уже увидит ошибку в логах.");
