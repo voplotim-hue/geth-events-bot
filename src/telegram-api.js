@@ -40,11 +40,12 @@ export class TelegramApi {
     });
   }
 
-  answerCallbackQuery(callbackQueryId, text) {
+  answerCallbackQuery(callbackQueryId, text, extra = {}) {
     return this.request("answerCallbackQuery", {
       callback_query_id: callbackQueryId,
       text,
-      show_alert: false
+      show_alert: false,
+      ...extra
     });
   }
 }
