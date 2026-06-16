@@ -183,6 +183,17 @@ function normalizeUserId(value) {
   return String(value).replace(/\.0$/, "").trim();
 }
 
+function eventRosterSheetName(event) {
+  const title = String(event.title || event.event_title || "Мероприятие")
+    .replace(/[\[\]\*?/\\:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim() || "Мероприятие";
+  const eventId = String(event.event_id || event.eventId || "").trim();
+  const suffix = eventId ? ` ${eventId}` : "";
+  const maxTitleLength = Math.max(1, 100 - "Мероприятие - ".length - suffix.length);
+  return `Мероприятие - ${title.slice(0, maxTitleLength).trim()}${suffix}`;
+}
+
 function sheetKey(config, sheetName) {
   return Object.entries(config.sheets || {}).find(([, configuredName]) => configuredName === sheetName)?.[0] || "";
 }
@@ -252,6 +263,15 @@ export class AppsScriptStore {
 
   updateSheetRow(sheetName, rowNumber, values) {
     return this.request("updateRow", { sheetName, rowNumber, values });
+  }
+
+  ensureEventRosterSheet({ sheetName, title, dates }) {
+    return this.request("ensureEventRosterSheet", {
+      sheetName,
+      title,
+      dates,
+      headers: APPS_SCRIPT_DISPLAY_HEADERS.eventRoster
+    });
   }
 
   valuesFor(columns, row) {
@@ -391,12 +411,8 @@ export class AppsScriptStore {
 
   async upsertEventRoster({ event, user, registration, decisionChanged = false }) {
     const sheetName = this.config.sheets.eventRoster;
-    const { rows } = await this.readTable(sheetName);
+    const eventSheetName = eventRosterSheetName(event);
     const telegramUserId = normalizeUserId(registration.telegram_user_id);
-    const existing = rows.find((row) => {
-      return String(row.event_id) === String(event.event_id)
-        && normalizeUserId(row.telegram_user_id) === telegramUserId;
-    });
 
     const rosterRow = {
       event_id: event.event_id,
@@ -416,11 +432,36 @@ export class AppsScriptStore {
       role: user.role || ""
     };
 
-    if (existing) {
-      await this.updateSheetRow(sheetName, existing._rowNumber, this.valuesFor(EVENT_ROSTER_COLUMNS, rosterRow));
-    } else {
-      await this.appendRow(sheetName, this.valuesFor(EVENT_ROSTER_COLUMNS, rosterRow));
+    await this.upsertRosterRow(sheetName, rosterRow, (row) => {
+      return String(row.event_id) === String(event.event_id)
+        && normalizeUserId(row.telegram_user_id) === telegramUserId;
+    });
+
+    try {
+      await this.ensureEventRosterSheet({
+        sheetName: eventSheetName,
+        title: event.title,
+        dates: event.dates
+      });
+      await this.upsertRosterRow(eventSheetName, rosterRow, (row) => {
+        return normalizeUserId(row.telegram_user_id) === telegramUserId;
+      });
+    } catch (error) {
+      console.warn(`[event_roster_sheet] ${error.message}`);
     }
+  }
+
+  async upsertRosterRow(sheetName, rosterRow, matchRow) {
+    const { rows } = await this.readTable(sheetName);
+    const existing = rows.find(matchRow);
+    const values = this.valuesFor(EVENT_ROSTER_COLUMNS, rosterRow);
+
+    if (existing) {
+      await this.updateSheetRow(sheetName, existing._rowNumber, values);
+      return;
+    }
+
+    await this.appendRow(sheetName, values);
   }
 
   async birthdaysFor(month, day) {

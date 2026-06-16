@@ -191,6 +191,12 @@ function applyHeaderStyle(sheet) {
   sheet.setFrozenRows(1);
 }
 
+function applyEventRosterSheetStyle(sheet) {
+  applyHeaderStyle(sheet);
+  sheet.setFrozenColumns(2);
+  sheet.autoResizeColumns(1, Math.max(sheet.getLastColumn(), 1));
+}
+
 function setupSheetHeaders() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
 
@@ -396,6 +402,29 @@ function updateRow(sheetName, rowNumber, values) {
   return { rowNumber: Number(rowNumber) };
 }
 
+function ensureEventRosterSheet(sheetName, title, dates, headers) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const safeName = String(sheetName || '').trim().slice(0, 100);
+  if (!safeName) {
+    throw new Error('Missing event roster sheet name');
+  }
+
+  const sheet = spreadsheet.getSheetByName(safeName) || spreadsheet.insertSheet(safeName);
+  const finalHeaders = headers && headers.length ? headers : SHEET_DISPLAY_HEADERS.EventRoster;
+
+  sheet.getRange(1, 1, 1, finalHeaders.length).setValues([finalHeaders]);
+  applyEventRosterSheetStyle(sheet);
+
+  if (title || dates) {
+    sheet.setTabColor('#0f6b85');
+  }
+
+  return {
+    sheetName: safeName,
+    created: sheet.getLastRow() <= 1
+  };
+}
+
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : '{}');
@@ -413,6 +442,13 @@ function doPost(e) {
 
     if (body.action === 'updateRow') {
       return jsonResponse({ ok: true, result: updateRow(body.sheetName, body.rowNumber, body.values || []) });
+    }
+
+    if (body.action === 'ensureEventRosterSheet') {
+      return jsonResponse({
+        ok: true,
+        result: ensureEventRosterSheet(body.sheetName, body.title || '', body.dates || '', body.headers || [])
+      });
     }
 
     if (body.action === 'applyRoleView') {
