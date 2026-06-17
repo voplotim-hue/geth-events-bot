@@ -282,8 +282,8 @@ export class ExcelStore {
       updated_at: isoNow(),
       role: "Участник"
     };
-    await this.appendRow(tableName, this.valuesFor(USER_COLUMNS, row));
-    return row;
+    const result = await this.appendRow(tableName, this.valuesFor(USER_COLUMNS, row));
+    return { ...row, _rowNumber: result?.rowNumber };
   }
 
   async getUserByTelegramId(telegramUserId) {
@@ -294,7 +294,11 @@ export class ExcelStore {
 
   async updateUserProfile({ telegramUser, privateChatId = "", profile }) {
     const tableName = this.config.tables.users;
-    const user = await this.ensureUserFromTelegram(telegramUser, privateChatId);
+    await this.ensureUserFromTelegram(telegramUser, privateChatId);
+    const user = await this.getUserByTelegramId(telegramUser.id);
+    if (!user?._rowNumber) {
+      throw new Error(`User row not found for ${telegramUser.id}`);
+    }
     const next = {
       ...user,
       telegram_user_id: normalizeUserId(telegramUser.id || user.telegram_user_id),
