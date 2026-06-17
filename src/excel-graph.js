@@ -1,4 +1,4 @@
-import { formatBirthDate, isoNow, parseBirthday } from "./time.js";
+import { formatBirthDate, isoNow, normalizeDateKey, parseBirthday } from "./time.js";
 import { normalizeBlessingTemplates } from "./blessings.js";
 import { isGuestRole, resolveProfileRole } from "./roles.js";
 
@@ -437,7 +437,7 @@ export class ExcelStore {
     const tableName = this.config.tables.birthdayLog;
     const { rows } = await this.readTable(tableName);
     return rows.find((row) => {
-      return String(row.date) === dateKey
+      return normalizeDateKey(row.date) === normalizeDateKey(dateKey)
         && normalizeUserId(row.telegram_user_id) === normalizeUserId(telegramUserId);
     });
   }
