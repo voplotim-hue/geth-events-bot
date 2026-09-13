@@ -3,6 +3,13 @@
 const BOT_SECRET = 'replace_with_GOOGLE_APPS_SCRIPT_SECRET';
 
 const USERS_SHEET_NAME = 'Users';
+const PROGRAM_POLLS_SHEET_NAME = 'ProgramPolls';
+const PROGRAM_VOTES_SHEET_NAME = 'Программа мероприятия';
+const EVENT_BROADCASTS_SHEET_NAME = 'EventBroadcasts';
+const WEEKLY_SERVICE_SHEET_NAME = 'Субботние служения';
+const WEEKLY_ATTENDANCE_SHEET_NAME = 'Посещаемость служений';
+const PASTORAL_SPREADSHEET_PROPERTY = 'GETH_PASTORAL_SPREADSHEET_ID';
+const PASTORAL_SHEET_NAME = 'Заметки';
 const ROLE_HEADER = 'Роль';
 const ROLE_VALUES = ['Участник', 'Помощник', 'Админ', 'Гость'];
 const SHEET_DISPLAY_HEADERS = {
@@ -29,6 +36,8 @@ const SHEET_DISPLAY_HEADERS = {
     'Даты',
     'Описание',
     'Варианты ответа',
+    'Фото Telegram file_id',
+    'Аудитория',
     'Статус',
     'ID группы',
     'ID сообщения',
@@ -51,19 +60,70 @@ const SHEET_DISPLAY_HEADERS = {
   EventRoster: [
     'ID мероприятия',
     'ФИ',
-    'Сдал',
+    'Оплата',
+    'Комментарий',
     'Церковь',
     'Дата рождения',
     'Примечание',
     'Пол',
     'Согласие родителей',
-    'Справка',
     'Ответ',
     'Статус решения',
     'Username',
     'Telegram ID',
     'Время ответа',
     'Роль'
+  ],
+  ProgramPolls: [
+    'ID программы',
+    'ID мероприятия',
+    'Мероприятие',
+    'Заголовок',
+    'Текст',
+    'Варианты',
+    'Фото Telegram file_id',
+    'Статус',
+    'Создал',
+    'Создано',
+    'Согласовал',
+    'Время согласования',
+    'Получателей',
+    'Отправлено',
+    'Ошибок',
+    'Заметки'
+  ],
+  [PROGRAM_VOTES_SHEET_NAME]: [
+    'ФИО',
+    'Мероприятие',
+    'Опрос',
+    'Ответ регистрации',
+    'Выбор программы',
+    'Предыдущий выбор',
+    'Статус решения',
+    'Время ответа',
+    'Церковь',
+    'ID программы',
+    'ID мероприятия',
+    'Telegram ID',
+    'Username',
+    'Роль'
+  ],
+  EventBroadcasts: [
+    'ID рассылки',
+    'ID мероприятия',
+    'Мероприятие',
+    'Тип',
+    'Текст',
+    'Фото Telegram file_id',
+    'Статус',
+    'Создал',
+    'Создано',
+    'Согласовал',
+    'Время согласования',
+    'Получателей',
+    'Отправлено',
+    'Ошибок',
+    'Заметки'
   ],
   BirthdayLog: [
     'Дата',
@@ -84,6 +144,33 @@ const SHEET_DISPLAY_HEADERS = {
     'Стих',
     'Пожелание',
     'Активен'
+  ],
+  [WEEKLY_SERVICE_SHEET_NAME]: [
+    'ID служения',
+    'Дата',
+    'Статус',
+    'ID сообщения лидеров',
+    'ID сообщения подростков',
+    'Создано',
+    'Отменено',
+    'Распределено'
+  ],
+  [WEEKLY_ATTENDANCE_SHEET_NAME]: [
+    'ID служения',
+    'Дата',
+    'Telegram ID',
+    'ФИО',
+    'Username',
+    'Роль',
+    'Группа',
+    'Ответ на опрос',
+    'Фактически присутствует',
+    'Источник отметки',
+    'Нагрузка лидера',
+    'Назначенный лидер ID',
+    'Назначенный лидер',
+    'Время ответа',
+    'Обновлено'
   ]
 };
 const USER_HEADER_ALIASES = {
@@ -134,6 +221,27 @@ const DECISION_CHANGED_TEXT = 'изменил решение';
 const DECISION_CHANGED_ROW_BACKGROUND = '#fde7e9';
 const DECISION_CHANGED_CELL_BACKGROUND = '#d93025';
 const DECISION_CHANGED_CELL_FONT = '#ffffff';
+const EVENT_ROSTER_SUMMARY_LABELS = [
+  'Сводка',
+  'Всего людей',
+  'Всего помощников',
+  'Всего подростков',
+  'Парней',
+  'Девочек',
+  'Лидеров мужчин',
+  'Лидеров женщин',
+  'Итоговая сумма'
+];
+const PROGRAM_OPTION_COLORS = [
+  '#d9ead3',
+  '#cfe2f3',
+  '#fff2cc',
+  '#eadcf8',
+  '#fce4d6',
+  '#d9ead3',
+  '#f4cccc',
+  '#d0e0e3'
+];
 
 function jsonResponse(payload) {
   return ContentService
@@ -164,6 +272,7 @@ function onOpen() {
     .addItem('Настроить русский вид таблицы', 'setupSpreadsheetView')
     .addItem('Обновить порядок и цвета ролей', 'applyUsersRoleView')
     .addItem('Подсветить изменения решений', 'applyAllEventRosterHighlights')
+    .addItem('Настроить программу мероприятий', 'ensureProgramSheets')
     .addToUi();
 }
 
@@ -196,11 +305,240 @@ function applyHeaderStyle(sheet) {
   sheet.setFrozenRows(1);
 }
 
+function headerIndex(sheet, headerName) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+    .map((header) => String(header || '').trim());
+  return headers.findIndex((header) => header === headerName) + 1;
+}
+
+function applyDateColumnFormat(sheet, headerName) {
+  const column = headerIndex(sheet, headerName);
+  if (!column) return;
+
+  sheet.getRange(2, column, Math.max(sheet.getMaxRows() - 1, 1), 1)
+    .setNumberFormat('dd.mm.yyyy');
+}
+
+function columnLetter(index) {
+  let letter = '';
+  let n = index;
+  while (n > 0) {
+    const mod = (n - 1) % 26;
+    letter = String.fromCharCode(65 + mod) + letter;
+    n = Math.floor((n - mod) / 26);
+  }
+  return letter;
+}
+
+function applyPaymentColumnFormat(sheet) {
+  const column = headerIndex(sheet, 'Оплата');
+  if (!column) return;
+
+  sheet.getRange(2, column, Math.max(sheet.getMaxRows() - 1, 1), 1)
+    .setNumberFormat('# ##0');
+}
+
+function applyEventRosterSummary(sheet) {
+  const paymentColumn = headerIndex(sheet, 'Оплата');
+  const roleColumn = headerIndex(sheet, 'Роль') || headerIndex(sheet, 'role');
+  const genderColumn = headerIndex(sheet, 'Пол');
+  const nameColumn = headerIndex(sheet, 'ФИ');
+  const answerColumn = headerIndex(sheet, 'Ответ');
+  if (!paymentColumn || !roleColumn || !genderColumn || !nameColumn || !answerColumn) return;
+
+  const paymentLetter = columnLetter(paymentColumn);
+  const roleLetter = columnLetter(roleColumn);
+  const genderLetter = columnLetter(genderColumn);
+  const nameLetter = columnLetter(nameColumn);
+  const answerLetter = columnLetter(answerColumn);
+  const dataLastRow = eventRosterDataLastRow(sheet);
+  const formulaLastRow = Math.max(2, dataLastRow);
+  const summaryRow = Math.max(3, dataLastRow + 2);
+
+  const paymentRange = `$${paymentLetter}$2:$${paymentLetter}$${formulaLastRow}`;
+  const roleRange = `$${roleLetter}$2:$${roleLetter}$${formulaLastRow}`;
+  const genderRange = `$${genderLetter}$2:$${genderLetter}$${formulaLastRow}`;
+  const nameRange = `$${nameLetter}$2:$${nameLetter}$${formulaLastRow}`;
+  const answerRange = `$${answerLetter}$2:$${answerLetter}$${formulaLastRow}`;
+  const maleRegex = 'муж|пар|маль|male|boy';
+  const femaleRegex = 'жен|дев|female|girl';
+  const leaderRegex = 'админ|помощник';
+  const goingAnswerRegex = 'записыва|(^|\\s)(еду|поеду|буду)(\\s|$)';
+  const notGoingAnswerRegex = 'не еду|не поед|не буду|пока не знаю|не знаю|думаю|нет|no';
+  const goingAnswerMask = `--REGEXMATCH(LOWER(${answerRange});"${goingAnswerRegex}");--(REGEXMATCH(LOWER(${answerRange});"${notGoingAnswerRegex}")=FALSE)`;
+
+  const values = [
+    ['Сводка', ''],
+    ['Всего людей', `=SUMPRODUCT(${goingAnswerMask};--(${nameRange}<>""))`],
+    ['Всего помощников', `=SUMPRODUCT(${goingAnswerMask};--REGEXMATCH(LOWER(${roleRange});"^помощник$"))`],
+    ['Всего подростков', `=SUMPRODUCT(${goingAnswerMask};--REGEXMATCH(LOWER(${roleRange});"^участник$"))`],
+    ['Парней', `=SUMPRODUCT(${goingAnswerMask};--REGEXMATCH(LOWER(${roleRange});"^участник$");--REGEXMATCH(LOWER(${genderRange});"${maleRegex}"))`],
+    ['Девочек', `=SUMPRODUCT(${goingAnswerMask};--REGEXMATCH(LOWER(${roleRange});"^участник$");--REGEXMATCH(LOWER(${genderRange});"${femaleRegex}"))`],
+    ['Лидеров мужчин', `=SUMPRODUCT(${goingAnswerMask};--REGEXMATCH(LOWER(${roleRange});"${leaderRegex}");--REGEXMATCH(LOWER(${genderRange});"${maleRegex}"))`],
+    ['Лидеров женщин', `=SUMPRODUCT(${goingAnswerMask};--REGEXMATCH(LOWER(${roleRange});"${leaderRegex}");--REGEXMATCH(LOWER(${genderRange});"${femaleRegex}"))`],
+    ['Итоговая сумма', `=SUMPRODUCT(${goingAnswerMask};N(${paymentRange}))`]
+  ];
+
+  const range = sheet.getRange(summaryRow, 2, values.length, 2);
+  range.setValues(values)
+    .setFontWeight('bold')
+    .setVerticalAlignment('middle')
+    .setBorder(true, true, true, true, true, true, '#ffffff', SpreadsheetApp.BorderStyle.SOLID);
+
+  sheet.getRange(summaryRow, 2, 1, 2).setBackground('#0f6b85').setFontColor('#ffffff');
+  sheet.getRange(summaryRow + 1, 2, 3, 2).setBackground('#e0f2fe').setFontColor('#0f172a');
+  sheet.getRange(summaryRow + 4, 2, 2, 2).setBackground('#dcfce7').setFontColor('#14532d');
+  sheet.getRange(summaryRow + 6, 2, 2, 2).setBackground('#fef3c7').setFontColor('#78350f');
+  sheet.getRange(summaryRow + 8, 2, 1, 2).setBackground('#0f766e').setFontColor('#ffffff');
+  sheet.getRange(summaryRow + 1, 3, values.length - 1, 1).setNumberFormat('# ##0');
+  sheet.getRange(summaryRow, 2, values.length, 2).setHorizontalAlignment('left');
+  sheet.getRange(summaryRow, 3, values.length, 1).setHorizontalAlignment('right');
+  sheet.autoResizeColumns(2, 2);
+}
+
+function clearEventRosterSummary(sheet) {
+  const lastRow = Math.max(sheet.getLastRow(), 1);
+  sheet.getRange(1, SHEET_DISPLAY_HEADERS.EventRoster.length + 1, 1, 8).clearContent().clearFormat();
+
+  if (lastRow < 2) return;
+
+  const firstColumnValues = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  const secondColumnValues = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+  firstColumnValues.forEach(([value], index) => {
+    const firstText = String(value || '').trim();
+    const secondText = String((secondColumnValues[index] || [])[0] || '').trim();
+    if (['Бюджет', 'Сводка'].includes(firstText) || EVENT_ROSTER_SUMMARY_LABELS.includes(secondText)) {
+      sheet.getRange(index + 2, 1, 1, 20).clearContent().clearFormat();
+    }
+  });
+}
+
+function isEventRosterSummaryRow(row) {
+  const firstText = String(row['ID мероприятия'] || row.event_id || '').trim();
+  const secondText = String(row['ФИ'] || row['ФИО'] || '').trim();
+  return ['Бюджет', 'Сводка'].includes(firstText) || EVENT_ROSTER_SUMMARY_LABELS.includes(secondText);
+}
+
+function eventRosterDataLastRow(sheet) {
+  const lastRow = sheet.getLastRow();
+  const dataWidth = SHEET_DISPLAY_HEADERS.EventRoster.length;
+  if (lastRow < 2) return 1;
+
+  const values = sheet.getRange(2, 1, lastRow - 1, dataWidth).getValues();
+  let result = 1;
+  values.forEach((row, index) => {
+    const marker = String(row[0] || '').trim();
+    if (['Бюджет', 'Сводка'].includes(marker)) return;
+    if (EVENT_ROSTER_SUMMARY_LABELS.includes(String(row[1] || '').trim())) return;
+    if (row[0] || row[1] || row[9] || row[11] || row[12]) {
+      result = index + 2;
+    }
+  });
+  return result;
+}
+
+function normalizeSortText(value) {
+  return String(value || '')
+    .replace(/ё/g, 'е')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function compareSortText(a, b) {
+  return normalizeSortText(a).localeCompare(normalizeSortText(b), 'ru');
+}
+
+function sortEventRosterDataRows(sheet) {
+  const lastRow = sheet.getLastRow();
+  const dataWidth = SHEET_DISPLAY_HEADERS.EventRoster.length;
+  if (lastRow < 3) return;
+
+  const headers = SHEET_DISPLAY_HEADERS.EventRoster;
+  const roleIndex = headers.indexOf('Роль');
+  const nameIndex = headers.indexOf('ФИ');
+  const eventIdIndex = headers.indexOf('ID мероприятия');
+  const usernameIndex = headers.indexOf('Username');
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, dataWidth);
+  const values = dataRange.getValues();
+  const dataRows = values.filter((row) => {
+    const marker = String(row[0] || '').trim();
+    if (['Бюджет', 'Сводка'].includes(marker)) return false;
+    if (EVENT_ROSTER_SUMMARY_LABELS.includes(String(row[1] || '').trim())) return false;
+    return row.some((cell) => cell !== '') && rowLooksLikeEventRosterData(row, headers);
+  });
+
+  dataRows.sort((a, b) => {
+    if (sheet.getName() === 'EventRoster') {
+      const eventDiff = compareSortText(a[eventIdIndex], b[eventIdIndex]);
+      if (eventDiff) return eventDiff;
+    }
+
+    const roleDiff = roleRank(a[roleIndex]) - roleRank(b[roleIndex]);
+    if (roleDiff) return roleDiff;
+
+    const nameDiff = compareSortText(a[nameIndex], b[nameIndex]);
+    if (nameDiff) return nameDiff;
+
+    return compareSortText(a[usernameIndex], b[usernameIndex]);
+  });
+
+  dataRange.clearContent();
+  if (dataRows.length) {
+    sheet.getRange(2, 1, dataRows.length, dataWidth).setValues(dataRows);
+  }
+}
+
+function applyEventRosterFilter(sheet) {
+  const dataWidth = SHEET_DISPLAY_HEADERS.EventRoster.length;
+  const dataLastRow = eventRosterDataLastRow(sheet);
+  try {
+    const existingFilter = sheet.getFilter();
+    if (existingFilter) {
+      existingFilter.remove();
+    }
+  } catch (error) {
+    console.warn(`Could not remove existing filter on ${sheet.getName()}: ${error.message || error}`);
+  }
+
+  if (dataLastRow < 2) return;
+  try {
+    sheet.getRange(1, 1, dataLastRow, dataWidth).createFilter();
+  } catch (error) {
+    const message = String(error.message || error);
+    if (!/only one filter|только один фильтр/i.test(message)) {
+      throw error;
+    }
+    console.warn(`Could not recreate filter on ${sheet.getName()}: ${message}`);
+  }
+}
+
 function applyEventRosterSheetStyle(sheet) {
+  clearEventRosterSummary(sheet);
+  sortEventRosterDataRows(sheet);
   applyHeaderStyle(sheet);
-  sheet.setFrozenColumns(2);
+  applyDateColumnFormat(sheet, 'Дата рождения');
+  applyPaymentColumnFormat(sheet);
+  sheet.setFrozenColumns(3);
   sheet.autoResizeColumns(1, Math.max(sheet.getLastColumn(), 1));
+  applyEventRosterHiddenColumns(sheet);
   applyDecisionChangeHighlights(sheet);
+  applyEventRosterFilter(sheet);
+  applyEventRosterSummary(sheet);
+}
+
+function applyEventRosterHiddenColumns(sheet) {
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn > 0) {
+    sheet.showColumns(1, lastColumn);
+  }
+
+  ['ID мероприятия', 'Telegram ID', 'Примечание', 'Пол'].forEach((header) => {
+    const column = headerIndex(sheet, header);
+    if (column) {
+      sheet.hideColumns(column);
+    }
+  });
 }
 
 function isEventRosterSheetName(sheetName) {
@@ -208,9 +546,7 @@ function isEventRosterSheetName(sheetName) {
 }
 
 function eventRosterHeaderIndex(sheet, headerName) {
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
-    .map((header) => String(header || '').trim());
-  return headers.findIndex((header) => header === headerName) + 1;
+  return headerIndex(sheet, headerName);
 }
 
 function applyDecisionChangeHighlights(sheet) {
@@ -252,6 +588,72 @@ function applyAllEventRosterHighlights() {
     });
 }
 
+function isProgramVotesSheetName(sheetName) {
+  return sheetName === PROGRAM_VOTES_SHEET_NAME;
+}
+
+function applyProgramVotesSheetStyle(sheet) {
+  applyHeaderStyle(sheet);
+  sheet.setFrozenColumns(1);
+  sheet.autoResizeColumns(1, Math.max(sheet.getLastColumn(), 1));
+
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn > 0) {
+    sheet.showColumns(1, lastColumn);
+  }
+
+  ['ID программы', 'ID мероприятия', 'Telegram ID', 'Username', 'Роль'].forEach((header) => {
+    const column = headerIndex(sheet, header);
+    if (column) {
+      sheet.hideColumns(column);
+    }
+  });
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const optionColumn = headerIndex(sheet, 'Выбор программы');
+  const statusColumn = headerIndex(sheet, 'Статус решения');
+  if (!optionColumn) return;
+
+  const optionValues = sheet.getRange(2, optionColumn, lastRow - 1, 1).getValues()
+    .map(([value]) => String(value || '').trim());
+  const optionColorByValue = {};
+  let colorIndex = 0;
+
+  optionValues.forEach((option) => {
+    if (!option || optionColorByValue[option]) return;
+    optionColorByValue[option] = PROGRAM_OPTION_COLORS[colorIndex % PROGRAM_OPTION_COLORS.length];
+    colorIndex += 1;
+  });
+
+  const rowBackgrounds = optionValues.map((option) => {
+    const color = optionColorByValue[option] || '#ffffff';
+    return Array.from({ length: lastColumn }, () => color);
+  });
+  sheet.getRange(2, 1, lastRow - 1, lastColumn).setBackgrounds(rowBackgrounds);
+
+  if (statusColumn) {
+    const statusRange = sheet.getRange(2, statusColumn, lastRow - 1, 1);
+    const statuses = statusRange.getValues();
+    const statusBackgrounds = [];
+    const statusFontColors = [];
+    const statusFontWeights = [];
+
+    statuses.forEach(([status]) => {
+      const changed = String(status || '').trim().toLowerCase() === DECISION_CHANGED_TEXT;
+      statusBackgrounds.push([changed ? DECISION_CHANGED_CELL_BACKGROUND : '#ffffff']);
+      statusFontColors.push([changed ? DECISION_CHANGED_CELL_FONT : '#202124']);
+      statusFontWeights.push([changed ? 'bold' : 'normal']);
+    });
+
+    statusRange
+      .setBackgrounds(statusBackgrounds)
+      .setFontColors(statusFontColors)
+      .setFontWeights(statusFontWeights);
+  }
+}
+
 function setupSheetHeaders() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
 
@@ -264,19 +666,85 @@ function setupSheetHeaders() {
       return;
     }
 
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     if (sheetName === 'EventRoster') {
-      applyEventRosterSheetStyle(sheet);
-    } else {
-      applyHeaderStyle(sheet);
+      return;
     }
+
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    applyHeaderStyle(sheet);
   });
 }
 
 function setupSpreadsheetView() {
   setupSheetHeaders();
+  ensureProgramSheets();
+  setupEventRosterSheets();
   applyUsersRoleView();
   applyAllEventRosterHighlights();
+}
+
+function normalizeEventRosterHeader(header) {
+  const value = String(header || '').trim();
+  const aliases = {
+    'Сдал': 'Оплата',
+    'примечание': 'Примечание',
+    'comment': 'Комментарий',
+    'comments': 'Комментарий',
+    'username': 'Username',
+    'telegram_user_id': 'Telegram ID',
+    'answered_at': 'Время ответа',
+    'role': 'Роль'
+  };
+  return aliases[value] || value;
+}
+
+function rowLooksLikeEventRosterData(row, oldHeaders) {
+  const byHeader = {};
+  oldHeaders.forEach((header, index) => {
+    byHeader[header] = row[index] === null ? '' : row[index];
+  });
+  const marker = String(byHeader['ID мероприятия'] || '').trim();
+  const name = String(byHeader['ФИ'] || byHeader['ФИО'] || '').trim();
+  if (['Бюджет', 'Сводка'].includes(marker) || EVENT_ROSTER_SUMMARY_LABELS.includes(name)) {
+    return false;
+  }
+  return Boolean(
+    byHeader['ID мероприятия']
+      || byHeader['ФИ']
+      || byHeader['Telegram ID']
+      || byHeader['Username']
+      || byHeader['Ответ']
+  );
+}
+
+function reorderEventRosterSheet(sheet, headers) {
+  const values = sheet.getDataRange().getValues();
+  const oldHeaders = (values[0] || []).map(normalizeEventRosterHeader);
+  const dataRows = values.slice(1)
+    .filter((row) => row.some((cell) => cell !== '') && rowLooksLikeEventRosterData(row, oldHeaders));
+  const nextRows = dataRows.map((row) => {
+    const byHeader = {};
+    oldHeaders.forEach((header, index) => {
+      byHeader[header] = row[index] === null ? '' : row[index];
+    });
+    return headers.map((header) => byHeader[header] ?? '');
+  });
+  const width = Math.max(sheet.getLastColumn(), headers.length + 6, 1);
+  const height = Math.max(sheet.getLastRow(), nextRows.length + 1, 1);
+
+  sheet.getRange(1, 1, height, width).clearContent().clearDataValidations();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (nextRows.length) {
+    sheet.getRange(2, 1, nextRows.length, headers.length).setValues(nextRows);
+  }
+  applyEventRosterSheetStyle(sheet);
+}
+
+function setupEventRosterSheets() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  spreadsheet.getSheets()
+    .filter((sheet) => isEventRosterSheetName(sheet.getName()))
+    .forEach((sheet) => reorderEventRosterSheet(sheet, SHEET_DISPLAY_HEADERS.EventRoster));
 }
 
 function normalizeUserHeader(header) {
@@ -322,6 +790,7 @@ function prepareRoleColumn() {
 
   sheet.getRange(2, column, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
   applyHeaderStyle(sheet);
+  applyDateColumnFormat(sheet, 'Дата рождения');
   return column;
 }
 
@@ -439,19 +908,43 @@ function readTable(sheetName) {
       });
       return row;
     })
-    .filter((row) => headers.some((header) => row[header] !== ''));
+    .filter((row) => {
+      if (!headers.some((header) => row[header] !== '')) return false;
+      if (isEventRosterSheetName(sheetName)) {
+        if (isEventRosterSummaryRow(row)) return false;
+        const marker = String(row['ID мероприятия'] || row.event_id || '').trim();
+        if (['Бюджет', 'Сводка'].includes(marker)) return false;
+        return Boolean(
+          row['ID мероприятия']
+            || row.event_id
+            || row['ФИ']
+            || row['Ответ']
+            || row.Username
+            || row.username
+            || row['Telegram ID']
+            || row.telegram_user_id
+        );
+      }
+      return true;
+    });
 
   return { headers, rows };
 }
 
 function appendRow(sheetName, values) {
   const sheet = sheetByName(sheetName);
+  if (isEventRosterSheetName(sheetName)) {
+    clearEventRosterSummary(sheet);
+  }
   sheet.appendRow(values);
   if (sheetName === USERS_SHEET_NAME) {
     applyUsersRoleView();
   }
   if (isEventRosterSheetName(sheetName)) {
     applyEventRosterSheetStyle(sheet);
+  }
+  if (isProgramVotesSheetName(sheetName)) {
+    applyProgramVotesSheetStyle(sheet);
   }
   return { rowNumber: sheet.getLastRow() };
 }
@@ -464,6 +957,9 @@ function updateRow(sheetName, rowNumber, values) {
   }
   if (isEventRosterSheetName(sheetName)) {
     applyEventRosterSheetStyle(sheet);
+  }
+  if (isProgramVotesSheetName(sheetName)) {
+    applyProgramVotesSheetStyle(sheet);
   }
   return { rowNumber: Number(rowNumber) };
 }
@@ -491,6 +987,258 @@ function ensureEventRosterSheet(sheetName, title, dates, headers) {
   };
 }
 
+function ensureSheetWithHeaders(sheetName, headers, options) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(sheetName) || spreadsheet.insertSheet(sheetName);
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  applyHeaderStyle(sheet);
+  if (options && options.tabColor) {
+    sheet.setTabColor(options.tabColor);
+  }
+  if (isProgramVotesSheetName(sheetName)) {
+    applyProgramVotesSheetStyle(sheet);
+  }
+  return sheet;
+}
+
+function ensureProgramSheets() {
+  ensureSheetWithHeaders(PROGRAM_POLLS_SHEET_NAME, SHEET_DISPLAY_HEADERS.ProgramPolls, { tabColor: '#674ea7' });
+  ensureSheetWithHeaders(PROGRAM_VOTES_SHEET_NAME, SHEET_DISPLAY_HEADERS[PROGRAM_VOTES_SHEET_NAME], { tabColor: '#38761d' });
+  ensureSheetWithHeaders(EVENT_BROADCASTS_SHEET_NAME, SHEET_DISPLAY_HEADERS.EventBroadcasts, { tabColor: '#3c78d8' });
+  return {
+    programPolls: PROGRAM_POLLS_SHEET_NAME,
+    programVotes: PROGRAM_VOTES_SHEET_NAME,
+    eventBroadcasts: EVENT_BROADCASTS_SHEET_NAME
+  };
+}
+
+function ensureWeeklyServiceSheets() {
+  const serviceSheet = ensureSheetWithHeaders(
+    WEEKLY_SERVICE_SHEET_NAME,
+    SHEET_DISPLAY_HEADERS[WEEKLY_SERVICE_SHEET_NAME],
+    { tabColor: '#6aa84f' }
+  );
+  const attendanceSheet = ensureSheetWithHeaders(
+    WEEKLY_ATTENDANCE_SHEET_NAME,
+    SHEET_DISPLAY_HEADERS[WEEKLY_ATTENDANCE_SHEET_NAME],
+    { tabColor: '#3d85c6' }
+  );
+  const presentColumn = headerIndex(attendanceSheet, 'Фактически присутствует');
+  const weightColumn = headerIndex(attendanceSheet, 'Нагрузка лидера');
+  if (presentColumn) {
+    attendanceSheet.getRange(2, presentColumn, Math.max(1, attendanceSheet.getMaxRows() - 1), 1)
+      .setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['Да', 'Нет'], true).build());
+  }
+  if (weightColumn) {
+    attendanceSheet.getRange(2, weightColumn, Math.max(1, attendanceSheet.getMaxRows() - 1), 1)
+      .setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['1', '2', '3', '4'], true).build());
+  }
+  attendanceSheet.setFrozenRows(1);
+  return { serviceSheet: serviceSheet.getName(), attendanceSheet: attendanceSheet.getName() };
+}
+
+function pastoralHeaders(headers) {
+  return headers && headers.length ? headers : [
+    'Дата',
+    'ID служения',
+    'Подросток',
+    'Username подростка',
+    'Лидер',
+    'Статус беседы',
+    'Комментарий',
+    'Создано'
+  ];
+}
+
+function getPastoralSpreadsheet(headers, createIfMissing) {
+  const properties = PropertiesService.getScriptProperties();
+  const storedId = properties.getProperty(PASTORAL_SPREADSHEET_PROPERTY);
+  if (storedId) {
+    try {
+      return SpreadsheetApp.openById(storedId);
+    } catch (error) {
+      properties.deleteProperty(PASTORAL_SPREADSHEET_PROPERTY);
+    }
+  }
+  if (!createIfMissing) return null;
+
+  const spreadsheet = SpreadsheetApp.create('GethTeens — Душепопечение');
+  properties.setProperty(PASTORAL_SPREADSHEET_PROPERTY, spreadsheet.getId());
+  return spreadsheet;
+}
+
+function ensurePastoralSheet(headers) {
+  const spreadsheet = getPastoralSpreadsheet(headers, true);
+  const sheet = spreadsheet.getSheetByName(PASTORAL_SHEET_NAME) || spreadsheet.getActiveSheet().setName(PASTORAL_SHEET_NAME);
+  const finalHeaders = pastoralHeaders(headers);
+  sheet.getRange(1, 1, 1, finalHeaders.length).setValues([finalHeaders]);
+  applyHeaderStyle(sheet);
+  sheet.setTabColor('#674ea7');
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(7, 420);
+  return { spreadsheet, sheet };
+}
+
+function normalizeViewerEmails(viewerEmails) {
+  return [...new Set((viewerEmails || [])
+    .map((email) => String(email || '').trim().toLowerCase())
+    .filter((email) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)))];
+}
+
+function sharePastoralWorkbook(spreadsheet, viewerEmails) {
+  const emails = normalizeViewerEmails(viewerEmails);
+  emails.forEach((email) => spreadsheet.addEditor(email));
+  return emails;
+}
+
+function createPastoralWorkbook(headers, viewerEmails) {
+  const { spreadsheet } = ensurePastoralSheet(headers);
+  const sharedWith = sharePastoralWorkbook(spreadsheet, viewerEmails);
+  return { id: spreadsheet.getId(), url: spreadsheet.getUrl(), created: true, sharedWith };
+}
+
+function pastoralWorkbookInfo() {
+  const spreadsheet = getPastoralSpreadsheet(null, false);
+  if (!spreadsheet) return { exists: false };
+  return { exists: true, id: spreadsheet.getId(), url: spreadsheet.getUrl() };
+}
+
+function appendPastoralNote(values, headers) {
+  const { sheet } = ensurePastoralSheet(headers);
+  const finalHeaders = pastoralHeaders(headers);
+  const row = finalHeaders.map((_, index) => (values || [])[index] || '');
+  sheet.appendRow(row);
+  return { rowNumber: sheet.getLastRow(), url: sheet.getParent().getUrl() };
+}
+
+function upsertProgramVote(values) {
+  ensureProgramSheets();
+  const sheet = sheetByName(PROGRAM_VOTES_SHEET_NAME);
+  const headers = SHEET_DISPLAY_HEADERS[PROGRAM_VOTES_SHEET_NAME];
+  const normalizedValues = headers.map((_, index) => {
+    const value = (values || [])[index];
+    return value === null || value === undefined ? '' : value;
+  });
+  const programIdIndex = headers.indexOf('ID программы');
+  const telegramUserIdIndex = headers.indexOf('Telegram ID');
+  const programId = String(normalizedValues[programIdIndex] || '').trim();
+  const telegramUserId = normalizeBulkUserId(normalizedValues[telegramUserIdIndex]);
+  if (!programId || !telegramUserId) {
+    throw new Error('upsertProgramVote requires ID программы and Telegram ID');
+  }
+
+  const matches = [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    const rowCount = lastRow - 1;
+    const rows = sheet.getRange(2, 1, rowCount, headers.length).getValues();
+    rows.forEach((row, index) => {
+      const rowProgramId = String(row[programIdIndex] || '').trim();
+      const rowTelegramUserId = normalizeBulkUserId(row[telegramUserIdIndex]);
+      if (rowProgramId === programId && rowTelegramUserId === telegramUserId) {
+        matches.push(index + 2);
+      }
+    });
+  }
+
+  if (matches.length) {
+    updateRow(PROGRAM_VOTES_SHEET_NAME, matches[0], normalizedValues);
+    for (let index = 1; index < matches.length; index += 1) {
+      sheet.getRange(matches[index], 1, 1, headers.length).clearContent();
+    }
+    applyProgramVotesSheetStyle(sheet);
+    return {
+      rowNumber: matches[0],
+      updated: true,
+      duplicatesCleared: Math.max(0, matches.length - 1)
+    };
+  }
+
+  const result = appendRow(PROGRAM_VOTES_SHEET_NAME, normalizedValues);
+  return {
+    rowNumber: result.rowNumber,
+    created: true,
+    duplicatesCleared: 0
+  };
+}
+
+function normalizeBulkUserId(value) {
+  return String(value || '').replace(/\.0$/, '').trim();
+}
+
+function normalizedGenderMap(gendersByUserId) {
+  const result = {};
+  Object.keys(gendersByUserId || {}).forEach((userId) => {
+    const normalizedUserId = normalizeBulkUserId(userId);
+    const gender = String(gendersByUserId[userId] || '').trim();
+    if (normalizedUserId && gender) {
+      result[normalizedUserId] = gender;
+    }
+  });
+  return result;
+}
+
+function bulkUpdateGenderColumn(sheet, gendersByUserId) {
+  const idColumn = headerIndex(sheet, 'Telegram ID') || headerIndex(sheet, 'telegram_user_id');
+  const genderColumn = headerIndex(sheet, 'Пол') || headerIndex(sheet, 'gender');
+  const lastRow = sheet.getLastRow();
+  if (!idColumn || !genderColumn || lastRow < 2) {
+    return 0;
+  }
+
+  const rowCount = lastRow - 1;
+  const userIds = sheet.getRange(2, idColumn, rowCount, 1).getValues();
+  const genders = sheet.getRange(2, genderColumn, rowCount, 1).getValues();
+  let updated = 0;
+
+  for (let index = 0; index < rowCount; index += 1) {
+    const userId = normalizeBulkUserId(userIds[index][0]);
+    const gender = gendersByUserId[userId];
+    if (!gender || String(genders[index][0] || '').trim() === gender) continue;
+
+    genders[index][0] = gender;
+    updated += 1;
+  }
+
+  if (updated) {
+    sheet.getRange(2, genderColumn, rowCount, 1).setValues(genders);
+  }
+
+  return updated;
+}
+
+function bulkUpdateGenders(gendersByUserId) {
+  const normalized = normalizedGenderMap(gendersByUserId);
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const result = {
+    usersUpdated: 0,
+    rosterRowsUpdated: 0,
+    rosterSheets: []
+  };
+
+  const usersSheet = sheetByName(USERS_SHEET_NAME);
+  result.usersUpdated = bulkUpdateGenderColumn(usersSheet, normalized);
+  if (result.usersUpdated) {
+    applyUsersRoleView();
+  }
+
+  spreadsheet.getSheets()
+    .filter((sheet) => isEventRosterSheetName(sheet.getName()))
+    .forEach((sheet) => {
+      const rowsUpdated = bulkUpdateGenderColumn(sheet, normalized);
+      if (rowsUpdated) {
+        applyEventRosterSheetStyle(sheet);
+      }
+      result.rosterRowsUpdated += rowsUpdated;
+      result.rosterSheets.push({
+        sheetName: sheet.getName(),
+        rowsUpdated
+      });
+    });
+
+  return result;
+}
+
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : '{}');
@@ -515,6 +1263,34 @@ function doPost(e) {
         ok: true,
         result: ensureEventRosterSheet(body.sheetName, body.title || '', body.dates || '', body.headers || [])
       });
+    }
+
+    if (body.action === 'ensureProgramSheets') {
+      return jsonResponse({ ok: true, result: ensureProgramSheets() });
+    }
+
+    if (body.action === 'ensureWeeklyServiceSheets') {
+      return jsonResponse({ ok: true, result: ensureWeeklyServiceSheets() });
+    }
+
+    if (body.action === 'createPastoralWorkbook') {
+      return jsonResponse({ ok: true, result: createPastoralWorkbook(body.headers || [], body.viewerEmails || []) });
+    }
+
+    if (body.action === 'pastoralWorkbookInfo') {
+      return jsonResponse({ ok: true, result: pastoralWorkbookInfo() });
+    }
+
+    if (body.action === 'appendPastoralNote') {
+      return jsonResponse({ ok: true, result: appendPastoralNote(body.values || [], body.headers || []) });
+    }
+
+    if (body.action === 'upsertProgramVote') {
+      return jsonResponse({ ok: true, result: upsertProgramVote(body.values || []) });
+    }
+
+    if (body.action === 'bulkUpdateGenders') {
+      return jsonResponse({ ok: true, result: bulkUpdateGenders(body.gendersByUserId || {}) });
     }
 
     if (body.action === 'applyRoleView') {

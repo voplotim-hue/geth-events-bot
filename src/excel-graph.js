@@ -26,6 +26,8 @@ const EVENT_COLUMNS = [
   "dates",
   "description",
   "options",
+  "photo_file_id",
+  "audience",
   "status",
   "group_chat_id",
   "message_id",
@@ -50,13 +52,13 @@ const REGISTRATION_COLUMNS = [
 const EVENT_ROSTER_COLUMNS = [
   "event_id",
   "ФИ",
-  "Сдал",
+  "Оплата",
+  "Комментарий",
   "Церковь",
   "Дата рождения",
   "примечание",
   "Пол",
   "Согласие родителей",
-  "Справка",
   "Ответ",
   "Статус решения",
   "username",
@@ -327,6 +329,8 @@ export class ExcelStore {
       dates: event.dates,
       description: event.description,
       options: event.options.join("|"),
+      photo_file_id: event.photoFileId || event.photo_file_id || "",
+      audience: event.audience || "all",
       status: "active",
       group_chat_id: event.groupChatId,
       message_id: event.messageId,
@@ -335,6 +339,23 @@ export class ExcelStore {
     };
     await this.appendRow(tableName, this.valuesFor(EVENT_COLUMNS, row));
     return row;
+  }
+
+  async updateEvent(eventId, patch) {
+    const tableName = this.config.tables.events;
+    const { rows } = await this.readTable(tableName);
+    const existing = rows.find((row) => String(row.event_id) === String(eventId));
+    if (!existing?._rowNumber) {
+      throw new Error(`Event not found: ${eventId}`);
+    }
+
+    const next = {
+      ...existing,
+      ...patch,
+      updated_at: isoNow()
+    };
+    await this.updateSheetRow(tableName, existing._rowNumber, this.valuesFor(EVENT_COLUMNS, next));
+    return next;
   }
 
   async getEvent(eventId) {
@@ -399,13 +420,13 @@ export class ExcelStore {
     const rosterRow = {
       event_id: event.event_id,
       "ФИ": registration.full_name || fullName(user) || registration.username,
-      "Сдал": "",
+      "Оплата": existing?.["Оплата"] || existing?.["Сдал"] || "",
+      "Комментарий": existing?.["Комментарий"] || "",
       "Церковь": user.church || "",
       "Дата рождения": formatBirthDate(user.birth_date),
       "примечание": user.notes || "",
       "Пол": user.gender || "",
       "Согласие родителей": user.parent_consent || "",
-      "Справка": user.medical_certificate || "",
       "Ответ": registration.answer,
       "Статус решения": decisionChanged ? "изменил решение" : "",
       username: registration.username,

@@ -202,15 +202,17 @@ export async function approveBirthdayGreeting({ config, store, telegram, dateKey
   let groupSent = false;
   const notes = [];
 
-  if (user.private_chat_id) {
+  const privateChatId = String(user.private_chat_id || user.telegram_user_id || "").trim();
+
+  if (privateChatId) {
     try {
-      await telegram.sendMessage(user.private_chat_id, message);
+      await telegram.sendMessage(privateChatId, message);
       privateSent = true;
     } catch (error) {
       notes.push(`private: ${error.message}`);
     }
   } else {
-    notes.push("private_chat_id is empty; user must send /start to the bot");
+    notes.push("private_chat_id and telegram_user_id are empty; user must send /start to the bot");
   }
 
   if (config.sendBirthdaysToGroup && config.groupChatId) {

@@ -6,6 +6,7 @@ import { ExcelStore } from "./excel-graph.js";
 import { AppsScriptStore } from "./apps-script-store.js";
 import { GoogleSheetsStore } from "./google-sheets.js";
 import { TelegramApi } from "./telegram-api.js";
+import { startWeeklyServiceScheduler } from "./weekly-service.js";
 
 loadDotEnv();
 
@@ -18,6 +19,7 @@ const store = config.appsScript.enabled
     : new ExcelStore(config.excel);
 
 startBirthdayScheduler({ config, store, telegram });
+startWeeklyServiceScheduler({ config, store, telegram });
 
 const bot = new Bot({ config, telegram, store });
 

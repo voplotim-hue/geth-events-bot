@@ -13,8 +13,55 @@ function normalizeText(value) {
     .replace(/ё/g, "е");
 }
 
+function compactText(value) {
+  return normalizeText(value).replace(/[^a-zа-я0-9]+/g, "");
+}
+
+function levenshteinDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const current = Array(right.length + 1).fill(0);
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    current[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + substitutionCost
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[right.length];
+}
+
 export function isGethsemaneChurch(value) {
-  return normalizeText(value) === "гефсимания";
+  const text = normalizeText(value);
+  const compact = compactText(value);
+  if (!compact) return false;
+
+  const exactAliases = [
+    "гефсимания",
+    "гефсемания",
+    "гетсимания",
+    "церковьгефсимания",
+    "церковьгефсемания",
+    "церковьгетсимания"
+  ];
+  if (exactAliases.some((alias) => compact.includes(alias))) return true;
+  if (["гефа", "гефы", "гефе", "гефу", "гефса", "гефсы", "гефсе"].some((alias) => compact.includes(alias))) return true;
+
+  const words = text.split(/[^a-zа-я0-9]+/).filter(Boolean);
+  return words.some((word) => {
+    if (["гефа", "гефса", "гефс", "gefa", "gefsa"].includes(word)) return true;
+    if (word.startsWith("геф") && word.length <= 6) return true;
+    if (word.startsWith("гефсим") || word.startsWith("гефсем") || word.startsWith("гетсим")) return true;
+    if (word.length >= 7 && levenshteinDistance(word, "гефсимания") <= 2) return true;
+    if (word.length >= 7 && levenshteinDistance(word, "гефсемания") <= 2) return true;
+    return false;
+  });
 }
 
 export function isGuestRole(value) {

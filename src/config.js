@@ -23,6 +23,15 @@ function parseBirthdayTime(value) {
   };
 }
 
+function parseDailyTime(value, envName, fallback) {
+  const raw = value || fallback;
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(raw);
+  if (!match) {
+    throw new Error(`${envName} must be HH:mm, got "${raw}"`);
+  }
+  return { hour: Number(match[1]), minute: Number(match[2]) };
+}
+
 export function loadConfig(env = process.env) {
   const telegramToken = env.TELEGRAM_BOT_TOKEN;
   if (!telegramToken) {
@@ -34,10 +43,20 @@ export function loadConfig(env = process.env) {
   const appsScriptEnabled = parseBoolean(env.GOOGLE_APPS_SCRIPT_ENABLED, false);
   const adminUserIdList = splitList(env.ADMIN_USER_IDS).map(String);
   const adminUserIds = new Set(adminUserIdList);
+  const leaderEventCreatorIds = new Set(
+    splitList(env.LEADER_EVENT_CREATOR_IDS || "384813731,443839519").map(String)
+  );
   const birthdayApproverChatId = env.BIRTHDAY_APPROVER_CHAT_ID
     || env.SUPERADMIN_USER_ID
     || adminUserIdList[0]
     || "";
+  const weeklyServiceCoordinatorIds = new Set(
+    splitList(env.WEEKLY_SERVICE_COORDINATOR_IDS || birthdayApproverChatId).map(String)
+  );
+  const pastoralViewerUserIds = new Set(
+    splitList(env.PASTORAL_VIEWER_USER_IDS || env.LEADER_EVENT_CREATOR_IDS || "384813731,443839519").map(String)
+  );
+  const pastoralViewerEmails = splitList(env.PASTORAL_VIEWER_EMAILS).map((email) => email.toLowerCase());
   const defaultOptions = String(env.EVENT_DEFAULT_OPTIONS || "Еду|Не еду|Пока не знаю")
     .split("|")
     .map((item) => item.trim())
@@ -131,9 +150,18 @@ export function loadConfig(env = process.env) {
     telegramToken,
     botUsername: String(env.TELEGRAM_BOT_USERNAME || "GethEvents_bot").replace(/^@/, ""),
     adminUserIds,
+    leaderEventCreatorIds,
     groupChatId: env.GROUP_CHAT_ID || "",
+    leadersGroupChatId: env.LEADERS_GROUP_CHAT_ID || "",
     timeZone: env.TIMEZONE || "Europe/Minsk",
     birthdayCheckTime: parseBirthdayTime(env.BIRTHDAY_CHECK_TIME),
+    weeklyService: {
+      enabled: parseBoolean(env.WEEKLY_SERVICE_ENABLED, false),
+      pollTime: parseDailyTime(env.WEEKLY_SERVICE_POLL_TIME, "WEEKLY_SERVICE_POLL_TIME", "10:00"),
+      coordinatorIds: weeklyServiceCoordinatorIds,
+      pastoralViewerUserIds,
+      pastoralViewerEmails
+    },
     sendBirthdaysToGroup: parseBoolean(env.SEND_BIRTHDAYS_TO_GROUP, true),
     birthdayApproverChatId,
     defaultOptions,

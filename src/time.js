@@ -4,6 +4,7 @@ export function localNowParts(timeZone) {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23"
@@ -17,6 +18,7 @@ export function localNowParts(timeZone) {
     dateKey: `${parts.year}-${parts.month}-${parts.day}`,
     month: Number(parts.month),
     day: Number(parts.day),
+    weekday: parts.weekday,
     hour: Number(parts.hour),
     minute: Number(parts.minute)
   };
@@ -39,7 +41,7 @@ export function parseBirthday(value) {
   }
 
   const raw = String(value).trim();
-  let match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(raw);
+  let match = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:T.*)?$/.exec(raw);
   if (match) {
     return {
       month: Number(match[2]),
