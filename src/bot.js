@@ -264,7 +264,7 @@ const PROFILE_FIELDS = [
   {
     key: "birth_date",
     label: "Дата рождения",
-    prompt: "Укажите дату рождения в формате ДД.ММ.ГГГГ, например 22.03.1996."
+    prompt: "Укажите дату рождения в формате ДД.ММ.ГГГГ, например: 22.03.1996"
   },
   {
     key: "full_name",
@@ -288,12 +288,12 @@ function normalizeBirthDate(value) {
   let month;
   let year;
 
-  const dotMatch = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  const dotMatch = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})\.?$/);
   if (dotMatch) {
     [, day, month, year] = dotMatch;
   }
 
-  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})\.?$/);
   if (!dotMatch && isoMatch) {
     [, year, month, day] = isoMatch;
   }
@@ -3080,7 +3080,7 @@ export class Bot {
     const field = PROFILE_FIELDS[state.step];
     const value = normalizeProfileValue(field, text);
     if (field.key === "birth_date" && !value) {
-      await this.telegram.sendMessage(message.chat.id, "Не получилось распознать дату. Отправьте дату в формате ДД.ММ.ГГГГ, например 22.03.1996.");
+      await this.telegram.sendMessage(message.chat.id, "Не получилось распознать дату. Отправьте дату в формате ДД.ММ.ГГГГ, например: 22.03.1996");
       return true;
     }
 
