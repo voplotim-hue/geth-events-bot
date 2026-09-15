@@ -1151,11 +1151,15 @@ export class Bot {
       return;
     }
 
-    const service = leaderActions.has(action)
-      ? await this.store.getWeeklyService(serviceIdOrDate)
-      : await this.resolveWeeklyService(serviceIdOrDate);
+    const service = action === "cancel"
+      ? await this.resolveWeeklyService(serviceIdOrDate)
+      : await this.store.getWeeklyService(serviceIdOrDate);
     if (!service) {
-      await this.answerCallbackQuerySafely(callbackQuery.id, "Служение не найдено.", { show_alert: true });
+      await this.answerCallbackQuerySafely(
+        callbackQuery.id,
+        "Опрос ещё не опубликован. Настройка нагрузки и распределение станут доступны после субботнего голосования.",
+        { show_alert: true }
+      );
       return;
     }
     if (action === "cancel") {
