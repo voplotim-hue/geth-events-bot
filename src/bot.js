@@ -856,7 +856,7 @@ export class Bot {
     );
     await this.sendCurrentProfilePrompt(message.chat.id, message.from.id);
     if (this.canManageEvents(message.from.id)) {
-      await this.sendAdminPanel(message.chat.id);
+      await this.sendAdminPanel(message.chat.id, message.from.id);
     }
   }
 
@@ -1024,9 +1024,9 @@ export class Bot {
     await this.startEventWizard(message.chat.id, message.from.id);
   }
 
-  async sendAdminPanel(chatId) {
+  async sendAdminPanel(chatId, userId = "") {
     await this.telegram.sendMessage(chatId, "Кнопка администратора закреплена внизу чата.", {
-      reply_markup: adminReplyKeyboard()
+      reply_markup: adminReplyKeyboard({ showWeeklyService: this.isWeeklyServiceCoordinator(userId) })
     });
   }
 
