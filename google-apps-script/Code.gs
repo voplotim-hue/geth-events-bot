@@ -272,6 +272,7 @@ function onOpen() {
     .addItem('Настроить русский вид таблицы', 'setupSpreadsheetView')
     .addItem('Обновить порядок и цвета ролей', 'applyUsersRoleView')
     .addItem('Подсветить изменения решений', 'applyAllEventRosterHighlights')
+    .addItem('Обновить даты рождения в мероприятиях', 'syncEventRosterBirthDates')
     .addItem('Настроить программу мероприятий', 'ensureProgramSheets')
     .addToUi();
 }
@@ -281,13 +282,27 @@ function onEdit(e) {
   if (!sheet || sheet.getName() !== USERS_SHEET_NAME) return;
 
   const roleColumn = roleColumnIndex(sheet);
-  if (!roleColumn) return;
-
   const edited = e.range;
-  const touchesRoleColumn = edited.getColumn() <= roleColumn && edited.getLastColumn() >= roleColumn;
+  const touchesRoleColumn = roleColumn
+    && edited.getColumn() <= roleColumn
+    && edited.getLastColumn() >= roleColumn;
   if (edited.getRow() > 1 && touchesRoleColumn) {
     applyUsersRoleView();
   }
+
+  const birthDateColumn = headerIndex(sheet, 'Дата рождения');
+  const touchesBirthDateColumn = birthDateColumn
+    && edited.getColumn() <= birthDateColumn
+    && edited.getLastColumn() >= birthDateColumn;
+  if (!touchesBirthDateColumn || edited.getLastRow() < 2) return;
+
+  const telegramIdColumn = headerIndex(sheet, 'Telegram ID') || headerIndex(sheet, 'telegram_user_id');
+  if (!telegramIdColumn) return;
+  const firstRow = Math.max(edited.getRow(), 2);
+  const userIds = sheet.getRange(firstRow, telegramIdColumn, edited.getLastRow() - firstRow + 1, 1)
+    .getValues()
+    .map((row) => row[0]);
+  syncEventRosterBirthDates(userIds);
 }
 
 function roleColumnIndex(sheet) {
@@ -1166,6 +1181,75 @@ function normalizeBulkUserId(value) {
   return String(value || '').replace(/\.0$/, '').trim();
 }
 
+function birthDateKey(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  const text = String(value || '').trim();
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const dot = text.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})\.?$/);
+  if (dot) {
+    return `${dot[3]}-${String(dot[2]).padStart(2, '0')}-${String(dot[1]).padStart(2, '0')}`;
+  }
+
+  return text;
+}
+
+function syncEventRosterBirthDates(targetUserIds) {
+  const selectedIds = new Set((targetUserIds || [])
+    .map(normalizeBulkUserId)
+    .filter(Boolean));
+  const usersSheet = sheetByName(USERS_SHEET_NAME);
+  const usersIdColumn = headerIndex(usersSheet, 'Telegram ID') || headerIndex(usersSheet, 'telegram_user_id');
+  const usersBirthDateColumn = headerIndex(usersSheet, 'Дата рождения') || headerIndex(usersSheet, 'birth_date');
+  if (!usersIdColumn || !usersBirthDateColumn || usersSheet.getLastRow() < 2) {
+    return { updated: 0, sheets: [] };
+  }
+
+  const userRows = usersSheet.getRange(2, 1, usersSheet.getLastRow() - 1, usersSheet.getLastColumn()).getValues();
+  const birthdaysByUserId = new Map();
+  userRows.forEach((row) => {
+    const userId = normalizeBulkUserId(row[usersIdColumn - 1]);
+    const birthDate = row[usersBirthDateColumn - 1];
+    if (!userId || !birthDate || (selectedIds.size && !selectedIds.has(userId))) return;
+    birthdaysByUserId.set(userId, birthDate);
+  });
+
+  const result = { updated: 0, sheets: [] };
+  SpreadsheetApp.getActiveSpreadsheet().getSheets()
+    .filter((sheet) => isEventRosterSheetName(sheet.getName()))
+    .forEach((sheet) => {
+      const rosterIdColumn = headerIndex(sheet, 'Telegram ID') || headerIndex(sheet, 'telegram_user_id');
+      const rosterBirthDateColumn = headerIndex(sheet, 'Дата рождения');
+      const lastRow = sheet.getLastRow();
+      if (!rosterIdColumn || !rosterBirthDateColumn || lastRow < 2) return;
+
+      const rowCount = lastRow - 1;
+      const userIds = sheet.getRange(2, rosterIdColumn, rowCount, 1).getValues();
+      const birthDates = sheet.getRange(2, rosterBirthDateColumn, rowCount, 1).getValues();
+      let updated = 0;
+      for (let index = 0; index < rowCount; index += 1) {
+        const userId = normalizeBulkUserId(userIds[index][0]);
+        const birthDate = birthdaysByUserId.get(userId);
+        if (!birthDate || birthDateKey(birthDates[index][0]) === birthDateKey(birthDate)) continue;
+        birthDates[index][0] = birthDate;
+        updated += 1;
+      }
+
+      if (updated) {
+        sheet.getRange(2, rosterBirthDateColumn, rowCount, 1).setValues(birthDates);
+        applyEventRosterSheetStyle(sheet);
+      }
+      result.updated += updated;
+      result.sheets.push({ sheetName: sheet.getName(), rowsUpdated: updated });
+    });
+
+  return result;
+}
+
 function normalizedGenderMap(gendersByUserId) {
   const result = {};
   Object.keys(gendersByUserId || {}).forEach((userId) => {
@@ -1291,6 +1375,10 @@ function doPost(e) {
 
     if (body.action === 'bulkUpdateGenders') {
       return jsonResponse({ ok: true, result: bulkUpdateGenders(body.gendersByUserId || {}) });
+    }
+
+    if (body.action === 'syncEventRosterBirthDates') {
+      return jsonResponse({ ok: true, result: syncEventRosterBirthDates(body.telegramUserIds || []) });
     }
 
     if (body.action === 'applyRoleView') {
