@@ -844,6 +844,20 @@ export class Bot {
       return;
     }
 
+    if (isProfileComplete(user)) {
+      await this.telegram.sendMessage(
+        message.chat.id,
+        "Рад снова видеть! Выберите нужное действие.",
+        this.canManageEvents(message.from.id)
+          ? { reply_markup: adminReplyKeyboard({ showWeeklyService: this.isWeeklyServiceCoordinator(message.from.id) }) }
+          : { reply_markup: userReplyKeyboard() }
+      );
+      if (this.canManageEvents(message.from.id)) {
+        await this.sendAdminPanel(message.chat.id, message.from.id);
+      }
+      return;
+    }
+
     this.startProfileForm(message.from.id, { linkedEventId });
     await this.telegram.sendMessage(
       message.chat.id,
