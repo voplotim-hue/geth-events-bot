@@ -1395,6 +1395,9 @@ export class Bot {
       ? await this.store.getUserByTelegramId(callbackQuery.from?.id)
       : null;
     if (!isProfileComplete(user)) {
+      this.logger.log(
+        `[event_vote] profile_required user=${callbackQuery.from?.id || ""} username=${callbackQuery.from?.username || ""} event=${eventId}`
+      );
       await this.answerCallbackQuerySafely(
         callbackQuery.id,
         "Сначала запусти @GethEvents_bot и заполни короткую анкету. После этого вернись к голосованию.",
@@ -1715,9 +1718,15 @@ export class Bot {
         answer,
         sourceMessageId: callbackQuery.message?.message_id || ""
       });
+      this.logger.log(
+        `[event_vote] saved user=${callbackQuery.from?.id || ""} username=${callbackQuery.from?.username || ""} event=${event.event_id || eventId} answer="${answer}"`
+      );
 
     } catch (error) {
-      this.logger.error("[callback]", error);
+      this.logger.error(
+        `[event_vote] failed user=${callbackQuery.from?.id || ""} username=${callbackQuery.from?.username || ""} event=${eventId} option=${optionIndexRaw}`,
+        error
+      );
       await this.sendCallbackFollowUp(callbackQuery, "Не удалось записать ответ. Администратор уже увидит ошибку в логах.");
     }
   }
