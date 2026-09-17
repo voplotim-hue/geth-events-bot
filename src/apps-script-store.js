@@ -376,6 +376,22 @@ function isIncompleteProfile(user) {
     || !String(user.church || "").trim();
 }
 
+function profileNameFromRoster(row) {
+  return String(row?.["ФИ"] || row?.full_name || "")
+    .trim()
+    .split(/\s+/)
+    .map(normalizeProfileNamePart)
+    .filter(Boolean);
+}
+
+function sameRosterName(left, right) {
+  const leftParts = profileNameFromRoster(left);
+  const rightParts = profileNameFromRoster(right);
+  if (leftParts.length < 2 || rightParts.length < 2) return false;
+  if (leftParts[0] !== rightParts[0] || leftParts[1] !== rightParts[1]) return false;
+  return leftParts.length < 3 || rightParts.length < 3 || leftParts[2] === rightParts[2];
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -978,16 +994,20 @@ export class AppsScriptStore {
       });
       await this.upsertRosterRow(eventSheetName, rosterRow, (row) => {
         return normalizeUserId(row.telegram_user_id) === telegramUserId;
-      });
+      }, { matchManualRosterByName: true });
     } catch (error) {
       console.warn(`[event_roster_sheet] ${error.message}`);
     }
   }
 
-  async upsertRosterRow(sheetName, rosterRow, matchRow) {
+  async upsertRosterRow(sheetName, rosterRow, matchRow, { matchManualRosterByName = false } = {}) {
     await this.clearEventRosterSummaryRows(sheetName);
     const { rows } = await this.readTable(sheetName);
-    const existing = rows.find(matchRow);
+    const existingByTelegramId = rows.find(matchRow);
+    const manualCandidates = matchManualRosterByName
+      ? rows.filter((row) => !normalizeUserId(row.telegram_user_id) && sameRosterName(row, rosterRow))
+      : [];
+    const existing = existingByTelegramId || (manualCandidates.length === 1 ? manualCandidates[0] : null);
     const next = existing
       ? {
           ...rosterRow,
