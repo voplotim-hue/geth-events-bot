@@ -350,6 +350,32 @@ function normalizeUserId(value) {
   return String(value).replace(/\.0$/, "").trim();
 }
 
+function normalizeProfileNamePart(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/ё/g, "е");
+}
+
+function isSameManualProfile(user, profile) {
+  const lastNameMatches = normalizeProfileNamePart(user.last_name) === normalizeProfileNamePart(profile.last_name);
+  const firstNameMatches = normalizeProfileNamePart(user.first_name) === normalizeProfileNamePart(profile.first_name);
+  if (!lastNameMatches || !firstNameMatches) return false;
+
+  const userMiddleName = normalizeProfileNamePart(user.middle_name);
+  const profileMiddleName = normalizeProfileNamePart(profile.middle_name);
+  return !userMiddleName || !profileMiddleName || userMiddleName === profileMiddleName;
+}
+
+function isIncompleteProfile(user) {
+  return !user
+    || !String(user.last_name || "").trim()
+    || !String(user.first_name || "").trim()
+    || !String(user.birth_date || "").trim()
+    || !String(user.church || "").trim();
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -718,14 +744,53 @@ export class AppsScriptStore {
 
   async updateUserProfile({ telegramUser, privateChatId = "", profile }) {
     const sheetName = this.config.sheets.users;
-    await this.ensureUserFromTelegram(telegramUser, privateChatId);
-    const user = await this.getUserByTelegramId(telegramUser.id);
-    if (!user?._rowNumber) {
-      throw new Error(`User row not found for ${telegramUser.id}`);
+    const { rows } = await this.readTable(sheetName);
+    const telegramUserId = normalizeUserId(telegramUser.id);
+    const currentUser = rows.find((row) => normalizeUserId(row.telegram_user_id) === telegramUserId);
+    const manualCandidates = rows.filter((row) => {
+      return !normalizeUserId(row.telegram_user_id) && isSameManualProfile(row, profile);
+    });
+    let user = currentUser;
+
+    // A manually entered card has no Telegram ID until the person completes the bot profile.
+    // Claim exactly one matching card instead of creating a duplicate and preserve its admin notes.
+    if (manualCandidates.length === 1 && (!currentUser || isIncompleteProfile(currentUser))) {
+      if (currentUser?._rowNumber && currentUser._rowNumber !== manualCandidates[0]._rowNumber) {
+        await this.updateSheetRow(sheetName, currentUser._rowNumber, Array(USER_COLUMNS.length).fill(""));
+        const refreshed = await this.readTable(sheetName);
+        user = refreshed.rows.find((row) => {
+          return !normalizeUserId(row.telegram_user_id) && isSameManualProfile(row, profile);
+        });
+      } else {
+        user = manualCandidates[0];
+      }
     }
+
+    if (!user?._rowNumber) {
+      const row = {
+        telegram_user_id: telegramUserId,
+        username: telegramUser.username || "",
+        last_name: profile.last_name,
+        first_name: profile.first_name,
+        middle_name: profile.middle_name,
+        birth_date: profile.birth_date,
+        church: profile.church,
+        gender: "",
+        parent_consent: "",
+        medical_certificate: "",
+        private_chat_id: privateChatId,
+        is_active: "yes",
+        notes: "updated by profile form",
+        updated_at: isoNow(),
+        role: resolveProfileRole({}, profile)
+      };
+      await this.appendRow(sheetName, this.valuesFor(USER_COLUMNS, row));
+      return row;
+    }
+
     const next = {
       ...user,
-      telegram_user_id: normalizeUserId(telegramUser.id || user.telegram_user_id),
+      telegram_user_id: telegramUserId || user.telegram_user_id,
       username: telegramUser.username || user.username || "",
       last_name: profile.last_name,
       first_name: profile.first_name,

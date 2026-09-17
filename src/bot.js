@@ -816,7 +816,7 @@ export class Bot {
     const linkedEventId = parseStartEventId(message.text || "");
 
     const user = this.store.enabled
-      ? await this.store.ensureUserFromTelegram(message.from, privateChatId)
+      ? await this.store.getUserByTelegramId(message.from.id)
       : null;
 
     if (message.chat.type !== "private") {
@@ -888,7 +888,7 @@ export class Bot {
       return;
     }
 
-    const user = await this.store.ensureUserFromTelegram(message.from, String(message.chat.id));
+    const user = await this.store.getUserByTelegramId(message.from.id);
     if (!isProfileComplete(user)) {
       this.startProfileForm(message.from.id);
       await this.telegram.sendMessage(
