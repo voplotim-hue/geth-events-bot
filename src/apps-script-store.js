@@ -986,18 +986,28 @@ export class AppsScriptStore {
         && normalizeUserId(row.telegram_user_id) === telegramUserId;
     });
 
-    try {
-      await this.ensureEventRosterSheet({
-        sheetName: eventSheetName,
-        title: event.title,
-        dates: event.dates
-      });
-      await this.upsertRosterRow(eventSheetName, rosterRow, (row) => {
-        return normalizeUserId(row.telegram_user_id) === telegramUserId;
-      }, { matchManualRosterByName: true });
-    } catch (error) {
-      console.warn(`[event_roster_sheet] ${error.message}`);
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await this.ensureEventRosterSheet({
+          sheetName: eventSheetName,
+          title: event.title,
+          dates: event.dates
+        });
+        await this.upsertRosterRow(eventSheetName, rosterRow, (row) => {
+          return normalizeUserId(row.telegram_user_id) === telegramUserId;
+        }, { matchManualRosterByName: true });
+        return;
+      } catch (error) {
+        lastError = error;
+        console.warn(
+          `[event_roster_sheet] event=${event.event_id} user=${telegramUserId} attempt=${attempt}: ${error.message}`
+        );
+        if (attempt < 3) await sleep(APPS_SCRIPT_RETRY_BASE_MS * attempt);
+      }
     }
+
+    throw lastError;
   }
 
   async upsertRosterRow(sheetName, rosterRow, matchRow, { matchManualRosterByName = false } = {}) {
