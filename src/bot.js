@@ -666,6 +666,7 @@ export class Bot {
     this.queuedProgramVotes = new Map();
     this.pendingProgramVoteSelections = new Map();
     this.queuedVoteRegistrations = new Map();
+    this.backgroundVoteRetries = new Map();
     this.pendingPastoralNotes = new Map();
   }
 
@@ -1693,6 +1694,7 @@ export class Bot {
   }
 
   async finishVoteRegistration({ callbackQuery, eventId, optionIndexRaw, event: providedEvent }) {
+    let answer = "";
     try {
       const event = providedEvent || await this.store.getEvent(eventId);
       if (!event) {
@@ -1705,7 +1707,7 @@ export class Bot {
         .map((item) => item.trim())
         .filter(Boolean);
       const optionIndex = Number(optionIndexRaw);
-      const answer = options[optionIndex];
+      answer = options[optionIndex];
 
       if (!answer) {
         await this.sendCallbackFollowUp(callbackQuery, "Такой вариант ответа не найден.");
@@ -1718,6 +1720,7 @@ export class Bot {
         answer,
         sourceMessageId: callbackQuery.message?.message_id || ""
       });
+      this.backgroundVoteRetries.delete(`${event.event_id}:${callbackQuery.from?.id || ""}`);
       this.logger.log(
         `[event_vote] saved user=${callbackQuery.from?.id || ""} username=${callbackQuery.from?.username || ""} event=${event.event_id || eventId} answer="${answer}"`
       );
@@ -1727,8 +1730,54 @@ export class Bot {
         `[event_vote] failed user=${callbackQuery.from?.id || ""} username=${callbackQuery.from?.username || ""} event=${eventId} option=${optionIndexRaw}`,
         error
       );
-      await this.sendCallbackFollowUp(callbackQuery, "Не удалось записать ответ. Администратор уже увидит ошибку в логах.");
+      this.scheduleBackgroundVoteRetry({
+        event: providedEvent,
+        telegramUser: callbackQuery.from,
+        answer,
+        sourceMessageId: callbackQuery.message?.message_id || ""
+      });
     }
+  }
+
+  scheduleBackgroundVoteRetry({ event, telegramUser, answer, sourceMessageId }) {
+    if (!event?.event_id || !telegramUser?.id || !answer) return;
+
+    const key = `${event.event_id}:${telegramUser.id}`;
+    const existing = this.backgroundVoteRetries.get(key);
+    this.backgroundVoteRetries.set(key, {
+      event,
+      telegramUser,
+      answer,
+      sourceMessageId,
+      attempt: existing?.attempt || 0,
+      scheduled: existing?.scheduled || false
+    });
+    if (!existing?.scheduled) this.runBackgroundVoteRetry(key);
+  }
+
+  runBackgroundVoteRetry(key) {
+    const pending = this.backgroundVoteRetries.get(key);
+    if (!pending) return;
+
+    pending.scheduled = true;
+    const delayMs = Math.min(10 * 60_000, 5_000 * (3 ** pending.attempt));
+    setTimeout(async () => {
+      const current = this.backgroundVoteRetries.get(key);
+      if (!current) return;
+
+      try {
+        await this.store.upsertRegistration(current);
+        this.backgroundVoteRetries.delete(key);
+        this.logger.log(`[event_vote_retry] saved event=${current.event.event_id} user=${current.telegramUser.id}`);
+      } catch (error) {
+        current.attempt += 1;
+        current.scheduled = false;
+        this.logger.warn(
+          `[event_vote_retry] event=${current.event.event_id} user=${current.telegramUser.id} attempt=${current.attempt}: ${error.message}`
+        );
+        this.runBackgroundVoteRetry(key);
+      }
+    }, delayMs).unref?.();
   }
 
   async sendCallbackFollowUp(callbackQuery, text) {

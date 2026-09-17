@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { loadDotEnv } from "./env.js";
 import { ExcelStore } from "./excel-graph.js";
 import { AppsScriptStore } from "./apps-script-store.js";
+import { startEventRosterReconciler } from "./event-roster-reconciler.js";
 import { GoogleSheetsStore } from "./google-sheets.js";
 import { TelegramApi } from "./telegram-api.js";
 import { startWeeklyServiceScheduler } from "./weekly-service.js";
@@ -20,6 +21,7 @@ const store = config.appsScript.enabled
 
 startBirthdayScheduler({ config, store, telegram });
 startWeeklyServiceScheduler({ config, store, telegram });
+startEventRosterReconciler({ store });
 
 const bot = new Bot({ config, telegram, store });
 

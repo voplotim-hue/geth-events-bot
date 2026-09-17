@@ -921,6 +921,74 @@ export class AppsScriptStore {
     return rows.filter((row) => String(row.status || "active") !== "closed");
   }
 
+  async reconcileActiveEventRosters() {
+    const [events, registrations, users] = await Promise.all([
+      this.listActiveEvents(),
+      this.readTable(this.config.sheets.registrations),
+      this.readTable(this.config.sheets.users)
+    ]);
+    const usersById = new Map((users.rows || []).map((user) => [
+      normalizeUserId(user.telegram_user_id),
+      user
+    ]));
+    let repaired = 0;
+    let errors = 0;
+
+    for (const event of events) {
+      const eventId = String(event.event_id || "");
+      if (!eventId) continue;
+
+      const registrationsForEvent = (registrations.rows || []).filter((registration) => {
+        return String(registration.event_id) === eventId && normalizeUserId(registration.telegram_user_id);
+      });
+      if (!registrationsForEvent.length) continue;
+
+      const eventSheetName = eventRosterSheetName(event);
+      let roster;
+      try {
+        roster = await this.readTable(eventSheetName);
+      } catch (error) {
+        try {
+          await this.ensureEventRosterSheet({
+            sheetName: eventSheetName,
+            title: event.title,
+            dates: event.dates
+          });
+          roster = await this.readTable(eventSheetName);
+        } catch (sheetError) {
+          errors += registrationsForEvent.length;
+          console.warn(`[event_roster_reconcile] event=${eventId}: ${sheetError.message}`);
+          continue;
+        }
+      }
+
+      const rosterUserIds = new Set((roster.rows || []).map((row) => normalizeUserId(row.telegram_user_id)));
+      for (const registration of registrationsForEvent) {
+        const telegramUserId = normalizeUserId(registration.telegram_user_id);
+        if (rosterUserIds.has(telegramUserId)) continue;
+
+        const user = usersById.get(telegramUserId);
+        if (!user) continue;
+
+        try {
+          await this.upsertEventRoster({
+            event,
+            user,
+            registration,
+            decisionChanged: String(registration.change_note || "").trim() === "изменил решение"
+          });
+          rosterUserIds.add(telegramUserId);
+          repaired += 1;
+        } catch (error) {
+          errors += 1;
+          console.warn(`[event_roster_reconcile] event=${eventId} user=${telegramUserId}: ${error.message}`);
+        }
+      }
+    }
+
+    return { repaired, errors };
+  }
+
   async upsertRegistration({ event, telegramUser, answer, sourceMessageId }) {
     const user = await this.ensureUserFromTelegram(telegramUser);
     const sheetName = this.config.sheets.registrations;
