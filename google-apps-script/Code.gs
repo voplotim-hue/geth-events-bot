@@ -10,6 +10,29 @@ const WEEKLY_SERVICE_SHEET_NAME = 'Субботние служения';
 const WEEKLY_ATTENDANCE_SHEET_NAME = 'Посещаемость служений';
 const PASTORAL_SPREADSHEET_PROPERTY = 'GETH_PASTORAL_SPREADSHEET_ID';
 const PASTORAL_SHEET_NAME = 'Заметки';
+const PASTORAL_CONTINUATIONS_SHEET_NAME = 'Продолжение бесед';
+const PASTORAL_CONTINUATION_HEADERS = [
+  'ID заявки',
+  'Тип',
+  'ID исходного служения',
+  'Дата исходного служения',
+  'Дата продолжения',
+  'Дата напоминания',
+  'Telegram ID подростка',
+  'Подросток',
+  'Username подростка',
+  'Telegram ID лидера',
+  'Лидер',
+  'Статус',
+  'Комментарий лидера',
+  'Согласовал',
+  'Время согласования',
+  'ID назначенного служения',
+  'Время назначения',
+  'Время напоминания',
+  'Создано',
+  'Обновлено'
+];
 const ROLE_HEADER = 'Роль';
 const ROLE_VALUES = ['Участник', 'Помощник', 'Админ', 'Гость'];
 const SHEET_DISPLAY_HEADERS = {
@@ -1140,6 +1163,141 @@ function appendPastoralNote(values, headers) {
   return { rowNumber: sheet.getLastRow(), url: sheet.getParent().getUrl() };
 }
 
+function ensurePastoralContinuationsSheet() {
+  const spreadsheet = getPastoralSpreadsheet(null, true);
+  const sheet = spreadsheet.getSheetByName(PASTORAL_CONTINUATIONS_SHEET_NAME)
+    || spreadsheet.insertSheet(PASTORAL_CONTINUATIONS_SHEET_NAME);
+  sheet.getRange(1, 1, 1, PASTORAL_CONTINUATION_HEADERS.length).setValues([PASTORAL_CONTINUATION_HEADERS]);
+  applyHeaderStyle(sheet);
+  sheet.setTabColor('#8e7cc3');
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(13, 420);
+  return { spreadsheet, sheet };
+}
+
+function pastoralContinuationRecord(row, rowNumber) {
+  const value = (header) => row[PASTORAL_CONTINUATION_HEADERS.indexOf(header)] || '';
+  return {
+    request_id: String(value('ID заявки')),
+    type: String(value('Тип')),
+    source_service_id: String(value('ID исходного служения')),
+    source_date: String(value('Дата исходного служения')),
+    target_date: String(value('Дата продолжения')),
+    reminder_date: String(value('Дата напоминания')),
+    teenager_user_id: String(value('Telegram ID подростка')),
+    teenager_name: String(value('Подросток')),
+    teenager_username: String(value('Username подростка')),
+    leader_user_id: String(value('Telegram ID лидера')),
+    leader_name: String(value('Лидер')),
+    status: String(value('Статус')),
+    leader_comment: String(value('Комментарий лидера')),
+    approved_by: String(value('Согласовал')),
+    approved_at: String(value('Время согласования')),
+    assigned_service_id: String(value('ID назначенного служения')),
+    assigned_at: String(value('Время назначения')),
+    reminder_sent_at: String(value('Время напоминания')),
+    created_at: String(value('Создано')),
+    updated_at: String(value('Обновлено')),
+    _rowNumber: rowNumber
+  };
+}
+
+function listPastoralContinuationRecords() {
+  const { sheet } = ensurePastoralContinuationsSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  return sheet.getRange(2, 1, lastRow - 1, PASTORAL_CONTINUATION_HEADERS.length)
+    .getValues()
+    .map((row, index) => pastoralContinuationRecord(row, index + 2));
+}
+
+function createPastoralContinuation(request) {
+  const data = request || {};
+  const requestId = String(data.request_id || '').trim();
+  if (!requestId) throw new Error('request_id is required');
+
+  const { sheet } = ensurePastoralContinuationsSheet();
+  const existing = listPastoralContinuationRecords().find((item) => item.request_id === requestId);
+  if (existing) return { ...existing, created: false };
+
+  const now = new Date().toISOString();
+  const record = {
+    request_id: requestId,
+    type: String(data.type || ''),
+    source_service_id: String(data.source_service_id || ''),
+    source_date: String(data.source_date || ''),
+    target_date: String(data.target_date || ''),
+    reminder_date: String(data.reminder_date || ''),
+    teenager_user_id: String(data.teenager_user_id || ''),
+    teenager_name: String(data.teenager_name || ''),
+    teenager_username: String(data.teenager_username || ''),
+    leader_user_id: String(data.leader_user_id || ''),
+    leader_name: String(data.leader_name || ''),
+    status: String(data.status || ''),
+    leader_comment: String(data.leader_comment || ''),
+    approved_by: '',
+    approved_at: '',
+    assigned_service_id: '',
+    assigned_at: '',
+    reminder_sent_at: '',
+    created_at: now,
+    updated_at: now
+  };
+  const row = PASTORAL_CONTINUATION_HEADERS.map((header) => record[{
+    'ID заявки': 'request_id', 'Тип': 'type', 'ID исходного служения': 'source_service_id',
+    'Дата исходного служения': 'source_date', 'Дата продолжения': 'target_date',
+    'Дата напоминания': 'reminder_date', 'Telegram ID подростка': 'teenager_user_id',
+    'Подросток': 'teenager_name', 'Username подростка': 'teenager_username',
+    'Telegram ID лидера': 'leader_user_id', 'Лидер': 'leader_name', 'Статус': 'status',
+    'Комментарий лидера': 'leader_comment', 'Согласовал': 'approved_by',
+    'Время согласования': 'approved_at', 'ID назначенного служения': 'assigned_service_id',
+    'Время назначения': 'assigned_at', 'Время напоминания': 'reminder_sent_at',
+    'Создано': 'created_at', 'Обновлено': 'updated_at'
+  }[header]] || '');
+  sheet.appendRow(row);
+  return { ...record, _rowNumber: sheet.getLastRow(), created: true };
+}
+
+function listPastoralContinuations(filters) {
+  const data = filters || {};
+  return listPastoralContinuationRecords().filter((record) => {
+    if (data.status && record.status !== String(data.status)) return false;
+    if (data.targetDate && record.target_date !== String(data.targetDate)) return false;
+    if (data.reminderDate && record.reminder_date !== String(data.reminderDate)) return false;
+    return true;
+  });
+}
+
+function updatePastoralContinuation(requestId, patch) {
+  const { sheet } = ensurePastoralContinuationsSheet();
+  const records = listPastoralContinuationRecords();
+  const record = records.find((item) => item.request_id === String(requestId || ''));
+  if (!record) throw new Error('Pastoral continuation not found');
+
+  const allowed = [
+    'status', 'approved_by', 'approved_at', 'assigned_service_id', 'assigned_at', 'reminder_sent_at', 'leader_comment'
+  ];
+  const next = { ...record };
+  allowed.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(patch || {}, key)) next[key] = String(patch[key] || '');
+  });
+  next.updated_at = new Date().toISOString();
+  const headerToKey = {
+    'ID заявки': 'request_id', 'Тип': 'type', 'ID исходного служения': 'source_service_id',
+    'Дата исходного служения': 'source_date', 'Дата продолжения': 'target_date',
+    'Дата напоминания': 'reminder_date', 'Telegram ID подростка': 'teenager_user_id',
+    'Подросток': 'teenager_name', 'Username подростка': 'teenager_username',
+    'Telegram ID лидера': 'leader_user_id', 'Лидер': 'leader_name', 'Статус': 'status',
+    'Комментарий лидера': 'leader_comment', 'Согласовал': 'approved_by',
+    'Время согласования': 'approved_at', 'ID назначенного служения': 'assigned_service_id',
+    'Время назначения': 'assigned_at', 'Время напоминания': 'reminder_sent_at',
+    'Создано': 'created_at', 'Обновлено': 'updated_at'
+  };
+  sheet.getRange(record._rowNumber, 1, 1, PASTORAL_CONTINUATION_HEADERS.length)
+    .setValues([PASTORAL_CONTINUATION_HEADERS.map((header) => next[headerToKey[header]] || '')]);
+  return next;
+}
+
 function upsertProgramVote(values) {
   ensureProgramSheets();
   const sheet = sheetByName(PROGRAM_VOTES_SHEET_NAME);
@@ -1451,6 +1609,22 @@ function doPost(e) {
 
     if (body.action === 'appendPastoralNote') {
       return jsonResponse({ ok: true, result: appendPastoralNote(body.values || [], body.headers || []) });
+    }
+
+    if (body.action === 'createPastoralContinuation') {
+      return jsonResponse({ ok: true, result: createPastoralContinuation(body.request || {}) });
+    }
+
+    if (body.action === 'listPastoralContinuations') {
+      return jsonResponse({ ok: true, result: listPastoralContinuations({
+        targetDate: body.targetDate || '',
+        reminderDate: body.reminderDate || '',
+        status: body.status || ''
+      }) });
+    }
+
+    if (body.action === 'updatePastoralContinuation') {
+      return jsonResponse({ ok: true, result: updatePastoralContinuation(body.requestId, body.patch || {}) });
     }
 
     if (body.action === 'upsertProgramVote') {

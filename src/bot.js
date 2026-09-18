@@ -8,6 +8,8 @@ import { isoNow, localNowParts } from "./time.js";
 import {
   PASTORAL_NOTE_COLUMNS,
   isPresent,
+  nextSaturdayDateKey,
+  nextTuesdayDateKey,
   saturdayDateKey,
   serviceControlCallbackData,
   weightedAssignments
@@ -25,6 +27,10 @@ function parseStartEventId(text) {
 
 function callbackData(eventId, optionIndex) {
   return `vote:${eventId}:${optionIndex}`;
+}
+
+function pastoralContinuationCallbackData(action, requestId) {
+  return `continuation:${action}:${requestId}`;
 }
 
 function programSelectionMask(indexes) {
@@ -1266,13 +1272,37 @@ export class Bot {
         await this.answerCallbackQuerySafely(callbackQuery.id, "В таблице должны быть отмечены присутствующие лидеры и подростки.", { show_alert: true });
         return;
       }
-      const assignments = weightedAssignments(leaders, teenagers);
+      const approvedContinuations = await this.store.listPastoralContinuations({
+        targetDate: String(service.service_date || "").slice(0, 10),
+        status: "approved"
+      });
+      const leadersById = new Map(leaders.map((leader) => [String(leader.telegram_user_id), leader]));
+      const teenagersById = new Map(teenagers.map((teenager) => [String(teenager.telegram_user_id), teenager]));
+      const reservedTeenagerIds = new Set();
+      const lockedAssignments = [];
+      for (const continuation of approvedContinuations) {
+        if (continuation.type !== "next_saturday") continue;
+        const leader = leadersById.get(String(continuation.leader_user_id));
+        const teenager = teenagersById.get(String(continuation.teenager_user_id));
+        if (!leader || !teenager || reservedTeenagerIds.has(String(teenager.telegram_user_id))) continue;
+        reservedTeenagerIds.add(String(teenager.telegram_user_id));
+        lockedAssignments.push({ teenager, leader, continuation });
+      }
+      const remainingTeenagers = teenagers.filter((teenager) => !reservedTeenagerIds.has(String(teenager.telegram_user_id)));
+      const assignments = [
+        ...lockedAssignments,
+        ...weightedAssignments(leaders, remainingTeenagers)
+      ];
       for (const assignment of assignments) {
         await this.store.updateWeeklyAttendance(service.service_id, assignment.teenager.telegram_user_id, {
           assigned_leader_id: assignment.leader.telegram_user_id,
           assigned_leader_name: assignment.leader.full_name || assignment.leader.username || ""
         });
       }
+      await Promise.all(lockedAssignments.map(({ continuation }) => this.store.updatePastoralContinuation(
+        continuation.request_id,
+        { status: "assigned", assigned_service_id: service.service_id, assigned_at: isoNow() }
+      )));
       await this.store.updateWeeklyService(service.service_id, { status: "assigned", assigned_at: isoNow() });
       const sentTo = new Set();
       for (const leader of leaders) {
@@ -1321,7 +1351,8 @@ export class Bot {
         reply_markup: { inline_keyboard: [
           [{ text: "Побеседовали, всё хорошо", callback_data: `service_note:ok:${service.service_id}:${userId}` }],
           [{ text: "Рекомендовать беседу с другим лидером", callback_data: `service_note:refer:${service.service_id}:${userId}` }],
-          [{ text: "Хочу продолжить беседу в следующую субботу", callback_data: `service_note:continue:${service.service_id}:${userId}` }]
+          [{ text: "Хочу продолжить беседу в следующую субботу", callback_data: `service_note:continue:${service.service_id}:${userId}` }],
+          [{ text: "Продолжить общение в ЛС на неделе (прислать напоминание)", callback_data: `service_note:dm:${service.service_id}:${userId}` }]
         ] }
       });
     }
@@ -1350,7 +1381,8 @@ export class Bot {
     const labels = {
       ok: "Побеседовали, всё хорошо",
       refer: "Рекомендуется беседа с другим лидером",
-      continue: "Продолжить беседу в следующую субботу"
+      continue: "Продолжить беседу в следующую субботу",
+      dm: "Продолжить общение в ЛС на неделе"
     };
     const leader = await this.store.getUserByTelegramId(message.from.id);
     const values = [
@@ -1365,8 +1397,99 @@ export class Bot {
     ];
     await this.store.appendPastoralNote(values);
     this.pendingPastoralNotes.delete(String(message.from.id));
+    if (pending.status === "continue") {
+      const targetDate = nextSaturdayDateKey(pending.service.service_date);
+      const requestId = `cont_${pending.service.service_id}_${pending.teenager.telegram_user_id}_${message.from.id}`;
+      const sourceDate = String(pending.service.service_date || "").slice(0, 10);
+      const request = await this.store.createPastoralContinuation({
+        request_id: requestId,
+        type: "next_saturday",
+        source_service_id: pending.service.service_id,
+        source_date: sourceDate,
+        target_date: targetDate,
+        teenager_user_id: pending.teenager.telegram_user_id,
+        teenager_name: pending.teenager.full_name || pending.teenager.username || "Подросток",
+        teenager_username: pending.teenager.username || "",
+        leader_user_id: message.from.id,
+        leader_name: values[4],
+        status: "pending_approval",
+        leader_comment: text === "-" ? "" : text
+      });
+      if (request.created) await this.sendContinuationApprovalRequest(request);
+      await this.telegram.sendMessage(message.chat.id, "✅ Заметка сохранена. Заявка на продолжение беседы отправлена Роману на согласование.");
+      return true;
+    }
+
+    if (pending.status === "dm") {
+      const requestId = `dm_${pending.service.service_id}_${pending.teenager.telegram_user_id}_${message.from.id}`;
+      const sourceDate = String(pending.service.service_date || "").slice(0, 10);
+      await this.store.createPastoralContinuation({
+        request_id: requestId,
+        type: "weekday_dm",
+        source_service_id: pending.service.service_id,
+        source_date: sourceDate,
+        reminder_date: nextTuesdayDateKey(pending.service.service_date),
+        teenager_user_id: pending.teenager.telegram_user_id,
+        teenager_name: pending.teenager.full_name || pending.teenager.username || "Подросток",
+        teenager_username: pending.teenager.username || "",
+        leader_user_id: message.from.id,
+        leader_name: values[4],
+        status: "reminder_pending",
+        leader_comment: text === "-" ? "" : text
+      });
+      await this.telegram.sendMessage(message.chat.id, "✅ Заметка сохранена. Во вторник в 10:00 я напомню тебе продолжить общение в ЛС.");
+      return true;
+    }
+
     await this.telegram.sendMessage(message.chat.id, "✅ Закрытая заметка сохранена. Её увидят только Роман и Александр.");
     return true;
+  }
+
+  async sendContinuationApprovalRequest(request) {
+    const romanId = [...(this.config.weeklyService?.coordinatorIds || [])][0];
+    if (!romanId) throw new Error("WEEKLY_SERVICE_COORDINATOR_IDS is not configured");
+    const lines = [
+      "ЗАЯВКА НА ПРОДОЛЖЕНИЕ БЕСЕДЫ",
+      "",
+      `Подросток: ${request.teenager_name || "-"}`,
+      `Лидер: ${request.leader_name || "-"}`,
+      `Закрепить на: ${request.target_date || "-"}`
+    ];
+    if (request.leader_comment) lines.push(`Комментарий: ${request.leader_comment}`);
+    await this.telegram.sendMessage(romanId, lines.join("\n"), {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "Утвердить", callback_data: pastoralContinuationCallbackData("approve", request.request_id) },
+          { text: "Отклонить", callback_data: pastoralContinuationCallbackData("decline", request.request_id) }
+        ]]
+      }
+    });
+  }
+
+  async handlePastoralContinuationCallback(callbackQuery) {
+    const [, action, requestId] = String(callbackQuery.data || "").split(":");
+    if (!this.isWeeklyServiceCoordinator(callbackQuery.from?.id)) {
+      await this.answerCallbackQuerySafely(callbackQuery.id, "Согласовать заявку может только Роман.", { show_alert: true });
+      return;
+    }
+    if (!requestId || !["approve", "decline"].includes(action)) {
+      await this.answerCallbackQuerySafely(callbackQuery.id, "Неизвестное действие.", { show_alert: true });
+      return;
+    }
+
+    const approved = action === "approve";
+    const request = await this.store.updatePastoralContinuation(requestId, {
+      status: approved ? "approved" : "declined",
+      approved_by: String(callbackQuery.from.id),
+      approved_at: isoNow()
+    });
+    this.clearCallbackKeyboard(callbackQuery);
+    await this.answerCallbackQuerySafely(callbackQuery.id, approved ? "Заявка согласована." : "Заявка отклонена.");
+    const leaderMessage = approved
+      ? `Роман согласовал продолжение беседы с ${request.teenager_name || "подростком"}. На следующем служении он будет закреплён за тобой, если вы оба будете присутствовать.`
+      : `Роман пока не согласовал продолжение беседы с ${request.teenager_name || "подростком"}.`;
+    await this.telegram.sendMessage(request.leader_user_id, leaderMessage)
+      .catch((error) => this.logger.warn(`[pastoral_continuation_notice] ${error.message}`));
   }
 
   async handleCallback(callbackQuery) {
@@ -1414,6 +1537,11 @@ export class Bot {
 
     if (kind === "service_note") {
       await this.handlePastoralNoteStatusCallback(callbackQuery);
+      return;
+    }
+
+    if (kind === "continuation") {
+      await this.handlePastoralContinuationCallback(callbackQuery);
       return;
     }
 

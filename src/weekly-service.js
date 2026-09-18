@@ -63,6 +63,22 @@ export function weeklyServiceId(dateKey) {
   return `service_${String(dateKey || "").replace(/[^0-9]/g, "")}`;
 }
 
+export function nextSaturdayDateKey(dateKey) {
+  const normalized = String(dateKey || "").slice(0, 10);
+  const date = new Date(`${normalized}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) throw new Error(`Invalid service date: ${dateKey}`);
+  date.setUTCDate(date.getUTCDate() + 7);
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+export function nextTuesdayDateKey(dateKey) {
+  const normalized = String(dateKey || "").slice(0, 10);
+  const date = new Date(`${normalized}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) throw new Error(`Invalid service date: ${dateKey}`);
+  date.setUTCDate(date.getUTCDate() + 3);
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
 export function serviceVoteCallbackData(serviceId, group, answer) {
   return `service_vote:${serviceId}:${group}:${answer}`;
 }

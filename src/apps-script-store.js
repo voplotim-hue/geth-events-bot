@@ -755,6 +755,18 @@ export class AppsScriptStore {
     return this.request("appendPastoralNote", { values, headers: PASTORAL_NOTE_COLUMNS }, { maxAttempts: 1 });
   }
 
+  createPastoralContinuation(request) {
+    return this.request("createPastoralContinuation", { request }, { maxAttempts: 1 });
+  }
+
+  listPastoralContinuations({ targetDate, status = "approved" } = {}) {
+    return this.request("listPastoralContinuations", { targetDate, status }, { maxAttempts: 1 });
+  }
+
+  updatePastoralContinuation(requestId, patch) {
+    return this.request("updatePastoralContinuation", { requestId, patch }, { maxAttempts: 1 });
+  }
+
   valuesFor(columns, row) {
     return columns.map((column) => row[column] ?? "");
   }
