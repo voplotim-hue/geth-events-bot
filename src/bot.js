@@ -1320,9 +1320,8 @@ export class Bot {
       await this.telegram.sendMessage(callbackQuery.from.id, `Заметка: ${teenager.full_name || teenager.username}`, {
         reply_markup: { inline_keyboard: [
           [{ text: "Побеседовали, всё хорошо", callback_data: `service_note:ok:${service.service_id}:${userId}` }],
-          [{ text: "Нужна поддержка", callback_data: `service_note:support:${service.service_id}:${userId}` }],
-          [{ text: "Нужен повторный контакт", callback_data: `service_note:followup:${service.service_id}:${userId}` }],
-          [{ text: "Рекомендовать беседу с другим лидером", callback_data: `service_note:refer:${service.service_id}:${userId}` }]
+          [{ text: "Рекомендовать беседу с другим лидером", callback_data: `service_note:refer:${service.service_id}:${userId}` }],
+          [{ text: "Хочу продолжить беседу в следующую субботу", callback_data: `service_note:continue:${service.service_id}:${userId}` }]
         ] }
       });
     }
@@ -1350,9 +1349,8 @@ export class Bot {
     if (!text || text.startsWith("/")) return false;
     const labels = {
       ok: "Побеседовали, всё хорошо",
-      support: "Нужна поддержка",
-      followup: "Нужен повторный контакт",
-      refer: "Рекомендуется беседа с другим лидером"
+      refer: "Рекомендуется беседа с другим лидером",
+      continue: "Продолжить беседу в следующую субботу"
     };
     const leader = await this.store.getUserByTelegramId(message.from.id);
     const values = [
