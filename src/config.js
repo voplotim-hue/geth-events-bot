@@ -158,6 +158,11 @@ export function loadConfig(env = process.env) {
     weeklyService: {
       enabled: parseBoolean(env.WEEKLY_SERVICE_ENABLED, false),
       pollTime: parseDailyTime(env.WEEKLY_SERVICE_POLL_TIME, "WEEKLY_SERVICE_POLL_TIME", "10:00"),
+      coordinatorSummaryTime: parseDailyTime(
+        env.WEEKLY_SERVICE_COORDINATOR_SUMMARY_TIME,
+        "WEEKLY_SERVICE_COORDINATOR_SUMMARY_TIME",
+        "08:00"
+      ),
       pastoralReminderTime: parseDailyTime(
         env.PASTORAL_FOLLOWUP_REMINDER_TIME,
         "PASTORAL_FOLLOWUP_REMINDER_TIME",

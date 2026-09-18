@@ -9,6 +9,7 @@ import { GoogleSheetsStore } from "./google-sheets.js";
 import { startPastoralFollowupScheduler } from "./pastoral-followups.js";
 import { TelegramApi } from "./telegram-api.js";
 import { startWeeklyServiceScheduler } from "./weekly-service.js";
+import { startWeeklyServiceCoordinatorSummaryScheduler } from "./weekly-service-summary.js";
 
 loadDotEnv();
 
@@ -22,6 +23,7 @@ const store = config.appsScript.enabled
 
 startBirthdayScheduler({ config, store, telegram });
 startWeeklyServiceScheduler({ config, store, telegram });
+startWeeklyServiceCoordinatorSummaryScheduler({ config, store, telegram });
 startPastoralFollowupScheduler({ config, store, telegram });
 startEventRosterReconciler({ store });
 

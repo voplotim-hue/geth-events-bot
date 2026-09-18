@@ -1237,9 +1237,14 @@ export class Bot {
 
     if (action === "weights") {
       const leaders = (await this.store.listWeeklyAttendance(service.service_id))
-        .filter((row) => row.group === "leaders" && isPresent(row.actual_present));
+        .filter((row) => {
+          if (row.group !== "leaders") return false;
+          const actual = String(row.actual_present || "").trim().toLowerCase();
+          if (["нет", "no", "0", "false"].includes(actual)) return false;
+          return isPresent(row.actual_present) || String(row.poll_answer || "") === "Буду";
+        });
       if (!leaders.length) {
-        await this.answerCallbackQuerySafely(callbackQuery.id, "Сначала отметьте присутствующих лидеров в таблице.", { show_alert: true });
+        await this.answerCallbackQuerySafely(callbackQuery.id, "Пока нет лидеров с ответом «Буду».", { show_alert: true });
         return;
       }
       await this.answerCallbackQuerySafely(callbackQuery.id, "Выберите нагрузку.");
@@ -1266,7 +1271,12 @@ export class Bot {
 
     if (action === "assign") {
       const attendance = await this.store.listWeeklyAttendance(service.service_id);
-      const leaders = attendance.filter((row) => row.group === "leaders" && isPresent(row.actual_present));
+      const leaders = attendance.filter((row) => {
+        if (row.group !== "leaders") return false;
+        const actual = String(row.actual_present || "").trim().toLowerCase();
+        if (["нет", "no", "0", "false"].includes(actual)) return false;
+        return isPresent(row.actual_present) || String(row.poll_answer || "") === "Буду";
+      });
       const teenagers = attendance.filter((row) => row.group === "teenagers" && isPresent(row.actual_present));
       if (!leaders.length || !teenagers.length) {
         await this.answerCallbackQuerySafely(callbackQuery.id, "В таблице должны быть отмечены присутствующие лидеры и подростки.", { show_alert: true });
