@@ -667,6 +667,7 @@ export class Bot {
     this.pendingProgramVoteSelections = new Map();
     this.queuedVoteRegistrations = new Map();
     this.backgroundVoteRetries = new Map();
+    this.backgroundServiceVoteRetries = new Map();
     this.pendingPastoralNotes = new Map();
   }
 
@@ -1120,28 +1121,70 @@ export class Bot {
 
   async handleWeeklyServiceVote(callbackQuery) {
     const [, serviceId, group, answer] = String(callbackQuery.data || "").split(":");
-    const service = await this.store.getWeeklyService(serviceId);
-    if (!service || String(service.status) === "cancelled") {
-      await this.answerCallbackQuerySafely(callbackQuery.id, "Этот опрос отменён.", { show_alert: true });
-      return;
-    }
-    if (String(service.status) !== "polls_sent") {
-      await this.answerCallbackQuerySafely(callbackQuery.id, "Опрос пока недоступен.", { show_alert: true });
-      return;
-    }
     if (!["leaders", "teenagers"].includes(group) || !["yes", "no", "maybe"].includes(answer)) {
       await this.answerCallbackQuerySafely(callbackQuery.id, "Неизвестный вариант ответа.");
       return;
     }
 
-    const user = await this.store.ensureUserFromTelegram(callbackQuery.from);
-    const isLeader = this.isLeaderUser(user);
-    if ((group === "leaders") !== isLeader) {
-      await this.answerCallbackQuerySafely(callbackQuery.id, "Этот опрос предназначен для другой группы.", { show_alert: true });
+    await this.answerCallbackQuerySafely(callbackQuery.id, "✅ Голос принят");
+    this.scheduleWeeklyServiceVote({ serviceId, group, answer, telegramUser: callbackQuery.from });
+  }
+
+  async saveWeeklyServiceVote({ serviceId, group, answer, telegramUser }) {
+    const service = await this.store.getWeeklyService(serviceId);
+    if (!service || String(service.status) === "cancelled" || String(service.status) !== "polls_sent") {
+      this.logger.warn(`[weekly_service_vote] skipped service=${serviceId} status=${service?.status || "missing"}`);
       return;
     }
+
+    const user = await this.store.ensureUserFromTelegram(telegramUser);
+    if ((group === "leaders") !== this.isLeaderUser(user)) {
+      this.logger.warn(`[weekly_service_vote] skipped user=${telegramUser?.id || ""} group=${group} role=${user?.role || ""}`);
+      return;
+    }
+
     await this.store.upsertWeeklyAttendance({ service, user, group, answer });
-    await this.answerCallbackQuerySafely(callbackQuery.id, "✅ Ответ сохранён. Повторно нажимать не нужно.", { show_alert: true });
+    this.logger.log(`[weekly_service_vote] saved service=${serviceId} user=${telegramUser?.id || ""} answer=${answer}`);
+  }
+
+  scheduleWeeklyServiceVote({ serviceId, group, answer, telegramUser }) {
+    if (!serviceId || !telegramUser?.id) return;
+
+    const key = `${serviceId}:${telegramUser.id}`;
+    const existing = this.backgroundServiceVoteRetries.get(key);
+    this.backgroundServiceVoteRetries.set(key, {
+      serviceId,
+      group,
+      answer,
+      telegramUser,
+      attempt: existing?.attempt || 0,
+      scheduled: existing?.scheduled || false
+    });
+    if (!existing?.scheduled) this.runWeeklyServiceVoteRetry(key);
+  }
+
+  runWeeklyServiceVoteRetry(key) {
+    const pending = this.backgroundServiceVoteRetries.get(key);
+    if (!pending) return;
+
+    pending.scheduled = true;
+    const delayMs = pending.attempt === 0 ? 0 : Math.min(10 * 60_000, 5_000 * (3 ** pending.attempt));
+    setTimeout(async () => {
+      const current = this.backgroundServiceVoteRetries.get(key);
+      if (!current) return;
+
+      try {
+        await this.saveWeeklyServiceVote(current);
+        this.backgroundServiceVoteRetries.delete(key);
+      } catch (error) {
+        current.attempt += 1;
+        current.scheduled = false;
+        this.logger.warn(
+          `[weekly_service_vote_retry] service=${current.serviceId} user=${current.telegramUser.id} attempt=${current.attempt}: ${error.message}`
+        );
+        this.runWeeklyServiceVoteRetry(key);
+      }
+    }, delayMs).unref?.();
   }
 
   async handleWeeklyServiceCallback(callbackQuery) {

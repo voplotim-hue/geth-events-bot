@@ -184,7 +184,7 @@ export function startWeeklyServiceScheduler({ config, store, telegram, logger = 
   return setInterval(tick, 30 * 1000);
 }
 
-export function weeklyAttendanceRow({ service, user, group, answer, existing = {} }) {
+export function weeklyAttendanceRow({ service, user, group, answer, existing = {}, source = "опрос", actualPresent = "" }) {
   return {
     service_id: service.service_id,
     service_date: service.service_date,
@@ -194,8 +194,8 @@ export function weeklyAttendanceRow({ service, user, group, answer, existing = {
     role: user.role || "",
     group,
     poll_answer: attendanceLabel(answer),
-    actual_present: existing.actual_present || "",
-    attendance_source: "опрос",
+    actual_present: existing.actual_present || actualPresent || "",
+    attendance_source: source || existing.attendance_source || "опрос",
     leader_weight: existing.leader_weight || (group === "leaders" ? "2" : ""),
     assigned_leader_id: existing.assigned_leader_id || "",
     assigned_leader_name: existing.assigned_leader_name || "",

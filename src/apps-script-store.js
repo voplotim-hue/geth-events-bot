@@ -657,13 +657,13 @@ export class AppsScriptStore {
     return next;
   }
 
-  async upsertWeeklyAttendance({ service, user, group, answer }) {
+  async upsertWeeklyAttendance({ service, user, group, answer, source = "опрос", actualPresent = "" }) {
     await this.ensureWeeklyServiceSheets();
     const { rows } = await this.readTable(WEEKLY_ATTENDANCE_SHEET);
     const telegramUserId = normalizeUserId(user.telegram_user_id || user.id);
     const existing = rows.find((row) => String(row.service_id) === String(service.service_id)
       && normalizeUserId(row.telegram_user_id) === telegramUserId);
-    const row = weeklyAttendanceRow({ service, user, group, answer, existing });
+    const row = weeklyAttendanceRow({ service, user, group, answer, existing, source, actualPresent });
     const values = WEEKLY_ATTENDANCE_COLUMNS.map((header) => row[WEEKLY_ATTENDANCE_COLUMN_ALIASES[header]] || "");
     if (existing?._rowNumber) {
       await this.updateSheetRow(WEEKLY_ATTENDANCE_SHEET, existing._rowNumber, values);
@@ -671,6 +671,54 @@ export class AppsScriptStore {
       await this.appendRow(WEEKLY_ATTENDANCE_SHEET, values);
     }
     return row;
+  }
+
+  async seedWeeklyTeenAttendance({ service, users }) {
+    await this.ensureWeeklyServiceSheets();
+    const { rows } = await this.readTable(WEEKLY_ATTENDANCE_SHEET);
+    const existingByUserId = new Map((rows || [])
+      .filter((row) => String(row.service_id) === String(service.service_id))
+      .map((row) => [normalizeUserId(row.telegram_user_id), row]));
+    const writes = [];
+    for (const user of users) {
+      const telegramUserId = normalizeUserId(user.telegram_user_id || user.id);
+      if (!telegramUserId) continue;
+      const existing = existingByUserId.get(telegramUserId);
+      const row = weeklyAttendanceRow({
+        service,
+        user,
+        group: "teenagers",
+        answer: "yes",
+        existing: existing || {},
+        source: "мероприятие",
+        actualPresent: "Да"
+      });
+      const values = WEEKLY_ATTENDANCE_COLUMNS.map((header) => row[WEEKLY_ATTENDANCE_COLUMN_ALIASES[header]] || "");
+      if (existing?._rowNumber) {
+        writes.push(async () => {
+          await this.updateSheetRow(WEEKLY_ATTENDANCE_SHEET, existing._rowNumber, values);
+          return "updated";
+        });
+      } else {
+        writes.push(async () => {
+          await this.appendRow(WEEKLY_ATTENDANCE_SHEET, values);
+          return "added";
+        });
+      }
+    }
+
+    let added = 0;
+    let updated = 0;
+    const batchSize = 4;
+    for (let index = 0; index < writes.length; index += batchSize) {
+      const results = await Promise.all(writes.slice(index, index + batchSize).map((write) => write()));
+      for (const result of results) {
+        if (result === "added") added += 1;
+        else updated += 1;
+      }
+    }
+
+    return { added, updated };
   }
 
   async listWeeklyAttendance(serviceId) {
