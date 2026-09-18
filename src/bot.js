@@ -1133,6 +1133,7 @@ export class Bot {
     }
 
     await this.answerCallbackQuerySafely(callbackQuery.id, "✅ Голос принят");
+    this.sendCallbackFollowUp(callbackQuery, "✅ Ваш голос принят.");
     this.scheduleWeeklyServiceVote({ serviceId, group, answer, telegramUser: callbackQuery.from });
   }
 
@@ -1602,6 +1603,7 @@ export class Bot {
       "✅ Спасибо! Ваш голос принят.\n\nПовторно нажимать не нужно.",
       { show_alert: true }
     );
+    this.sendCallbackFollowUp(callbackQuery, "✅ Ваш голос принят.");
     this.finishVoteRegistrationOnce({ callbackQuery, eventId, optionIndexRaw, event });
   }
 
