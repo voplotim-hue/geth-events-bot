@@ -103,6 +103,11 @@ export function isPresent(value) {
   return ["да", "yes", "1", "true", "буду"].includes(String(value || "").trim().toLowerCase());
 }
 
+function isAtOrAfterPollTime(now, pollTime) {
+  return now.hour > pollTime.hour
+    || (now.hour === pollTime.hour && now.minute >= pollTime.minute);
+}
+
 export function attendanceLabel(answer) {
   return ({ yes: "Буду", no: "Не буду", maybe: "Пока не знаю" })[String(answer || "")] || "";
 }
@@ -150,16 +155,24 @@ export async function runWeeklyServicePoll({ config, store, telegram, logger = c
   const dateKey = dateKeyFromParts(now);
   await store.ensureWeeklyServiceSheets();
   let service = await store.getWeeklyServiceByDate(dateKey);
-  if (String(service?.status || "") === "cancelled") return { skipped: "cancelled", service };
-  if (String(service?.status || "") === "polls_sent") return { skipped: "already_sent", service };
+  if (service) {
+    const status = String(service.status || "").trim();
+    if (status === "cancelled") return { skipped: "cancelled", service };
 
-  if (!service) {
-    service = await store.createWeeklyService({
-      serviceId: weeklyServiceId(dateKey),
-      dateKey,
-      status: "scheduled"
-    });
+    // A row means this Saturday has already been prepared. Never publish a
+    // second poll just because a restart happened between two API requests.
+    return { skipped: "service_already_exists", service };
   }
+
+  service = await store.createWeeklyService({
+    serviceId: weeklyServiceId(dateKey),
+    dateKey,
+    status: "scheduled"
+  });
+
+  // Persist a launch lock before the first group message is sent. If Telegram
+  // or Apps Script briefly fails, a later scheduler tick must remain silent.
+  service = await store.updateWeeklyService(service.service_id, { status: "launching" });
 
   const leaderMessage = await telegram.sendMessage(
     config.leadersGroupChatId,
@@ -183,8 +196,18 @@ export async function runWeeklyServicePoll({ config, store, telegram, logger = c
 
 export function startWeeklyServiceScheduler({ config, store, telegram, logger = console }) {
   let running = false;
+  const startedAt = localNowParts(config.timeZone);
+  const skipAutomaticPollDate = startedAt.weekday === "Sat"
+    && isAtOrAfterPollTime(startedAt, config.weeklyService.pollTime)
+    ? startedAt.dateKey
+    : "";
+
   const tick = async () => {
     if (running) return;
+    const now = localNowParts(config.timeZone);
+    if (now.dateKey === skipAutomaticPollDate) {
+      return;
+    }
     running = true;
     try {
       const result = await runWeeklyServicePoll({ config, store, telegram, logger });
