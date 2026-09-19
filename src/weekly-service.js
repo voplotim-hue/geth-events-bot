@@ -143,11 +143,11 @@ export function weightedAssignments(leaders, teenagers) {
   return shuffle(teenagers).map((teenager, index) => ({ teenager, leader: slots[index] }));
 }
 
-export async function runWeeklyServicePoll({ config, store, telegram, logger = console }) {
+export async function runWeeklyServicePoll({ config, store, telegram, logger = console, now: suppliedNow } = {}) {
   if (!config.weeklyService?.enabled) return { skipped: "disabled" };
   if (!config.groupChatId || !config.leadersGroupChatId) return { skipped: "chat_not_configured" };
 
-  const now = localNowParts(config.timeZone);
+  const now = suppliedNow || localNowParts(config.timeZone);
   if (now.weekday !== "Sat" || now.hour !== config.weeklyService.pollTime.hour || now.minute !== config.weeklyService.pollTime.minute) {
     return { skipped: "not_due" };
   }
@@ -167,31 +167,29 @@ export async function runWeeklyServicePoll({ config, store, telegram, logger = c
   service = await store.createWeeklyService({
     serviceId: weeklyServiceId(dateKey),
     dateKey,
-    status: "scheduled"
+    status: "approval_pending"
   });
 
-  // Persist a launch lock before the first group message is sent. If Telegram
-  // or Apps Script briefly fails, a later scheduler tick must remain silent.
-  service = await store.updateWeeklyService(service.service_id, { status: "launching" });
-
-  const leaderMessage = await telegram.sendMessage(
-    config.leadersGroupChatId,
-    "Кто сегодня будет на подростковом служении?",
-    { reply_markup: weeklyPollKeyboard(service.service_id, "leaders") }
-  );
-  const teenMessage = await telegram.sendMessage(
-    config.groupChatId,
-    "Сегодня буду на подростковом служении?",
-    { reply_markup: weeklyPollKeyboard(service.service_id, "teenagers") }
-  );
-
-  service = await store.updateWeeklyService(service.service_id, {
-    status: "polls_sent",
-    leader_message_id: String(leaderMessage.message_id || ""),
-    teenager_message_id: String(teenMessage.message_id || "")
-  });
-  logger.log(`[weekly_service] polls sent for ${dateKey}`);
-  return { sent: true, service };
+  const approvalText = [
+    "СУББОТНИЕ ОПРОСЫ НА СОГЛАСОВАНИЕ",
+    "",
+    `Дата: ${dateKey.split("-").reverse().join(".")}`,
+    "",
+    "Будут опубликованы два опроса: для лидеров и для подростков.",
+    "До вашего подтверждения в групповые чаты ничего не отправляется."
+  ].join("\n");
+  for (const coordinatorId of config.weeklyService.coordinatorIds || []) {
+    await telegram.sendMessage(coordinatorId, approvalText, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Утвердить публикацию опросов", callback_data: serviceControlCallbackData("approve_polls", service.service_id) }],
+          [{ text: "Не публиковать сегодня", callback_data: serviceControlCallbackData("cancel", service.service_id) }]
+        ]
+      }
+    });
+  }
+  logger.log(`[weekly_service] poll approval requested for ${dateKey}`);
+  return { approvalRequested: true, service };
 }
 
 export function startWeeklyServiceScheduler({ config, store, telegram, logger = console }) {
@@ -211,7 +209,7 @@ export function startWeeklyServiceScheduler({ config, store, telegram, logger = 
     running = true;
     try {
       const result = await runWeeklyServicePoll({ config, store, telegram, logger });
-      if (result.sent) logger.log(`[weekly_service] scheduler created ${result.service.service_id}`);
+      if (result.approvalRequested) logger.log(`[weekly_service] scheduler created ${result.service.service_id}`);
     } catch (error) {
       logger.error("[weekly_service] scheduler", error);
     } finally {

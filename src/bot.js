@@ -12,6 +12,7 @@ import {
   nextTuesdayDateKey,
   saturdayDateKey,
   serviceControlCallbackData,
+  weeklyPollKeyboard,
   weightedAssignments
 } from "./weekly-service.js";
 
@@ -1088,6 +1089,16 @@ export class Bot {
     const dateKey = saturdayDateKey(localNowParts(this.config.timeZone));
     const service = await this.store.getWeeklyServiceByDate(dateKey);
     const status = service?.status || "ещё не создан";
+    const controlButtons = String(status) === "approval_pending"
+      ? [
+        [{ text: "Утвердить публикацию опросов", callback_data: serviceControlCallbackData("approve_polls", service.service_id) }],
+        [{ text: "Не публиковать сегодня", callback_data: serviceControlCallbackData("cancel", service.service_id) }]
+      ]
+      : [
+        [{ text: "Отменить опрос на эту субботу", callback_data: serviceControlCallbackData("cancel", service?.service_id || dateKey) }],
+        [{ text: "Настроить нагрузку лидеров", callback_data: serviceControlCallbackData("weights", service?.service_id || dateKey) }],
+        [{ text: "Сформировать группы", callback_data: serviceControlCallbackData("assign", service?.service_id || dateKey) }]
+      ];
     await this.telegram.sendMessage(
       message.chat.id,
       [
@@ -1098,11 +1109,7 @@ export class Bot {
       ].join("\n"),
       {
         reply_markup: {
-          inline_keyboard: [
-            [{ text: "Отменить опрос на эту субботу", callback_data: serviceControlCallbackData("cancel", service?.service_id || dateKey) }],
-            [{ text: "Настроить нагрузку лидеров", callback_data: serviceControlCallbackData("weights", service?.service_id || dateKey) }],
-            [{ text: "Сформировать группы", callback_data: serviceControlCallbackData("assign", service?.service_id || dateKey) }]
-          ]
+          inline_keyboard: controlButtons
         }
       }
     );
@@ -1233,6 +1240,42 @@ export class Bot {
 
     if (String(service.status) === "cancelled") {
       await this.answerCallbackQuerySafely(callbackQuery.id, "Опрос на эту субботу отменён.", { show_alert: true });
+      return;
+    }
+
+    if (action === "approve_polls") {
+      if (String(service.status) !== "approval_pending") {
+        await this.answerCallbackQuerySafely(callbackQuery.id, "Опросы уже были обработаны для этой субботы.", { show_alert: true });
+        return;
+      }
+
+      await this.answerCallbackQuerySafely(callbackQuery.id, "Публикую опросы по вашему согласованию.");
+      try {
+        await this.store.updateWeeklyService(service.service_id, { status: "publishing_leaders" });
+        const leaderMessage = await this.telegram.sendMessage(
+          this.config.leadersGroupChatId,
+          "Кто сегодня будет на подростковом служении?",
+          { reply_markup: weeklyPollKeyboard(service.service_id, "leaders") }
+        );
+        await this.store.updateWeeklyService(service.service_id, {
+          status: "leader_poll_published",
+          leader_message_id: String(leaderMessage.message_id || "")
+        });
+        const teenMessage = await this.telegram.sendMessage(
+          this.config.groupChatId,
+          "Сегодня буду на подростковом служении?",
+          { reply_markup: weeklyPollKeyboard(service.service_id, "teenagers") }
+        );
+        await this.store.updateWeeklyService(service.service_id, {
+          status: "polls_sent",
+          teenager_message_id: String(teenMessage.message_id || "")
+        });
+        this.clearCallbackKeyboard(callbackQuery);
+        await this.telegram.sendMessage(callbackQuery.from.id, "✅ Опросы опубликованы в группах по вашему согласованию.");
+      } catch (error) {
+        this.logger.error("[weekly_service_approval]", error);
+        await this.telegram.sendMessage(callbackQuery.from.id, "Не удалось завершить публикацию опросов. Повторно ничего не отправлялось автоматически.");
+      }
       return;
     }
 
