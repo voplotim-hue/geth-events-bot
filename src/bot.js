@@ -746,6 +746,15 @@ export class Bot {
 
   async handleMessage(message) {
     this.logger.log(`[message] chat=${message.chat?.id} type=${message.chat?.type} from=${message.from?.id} text=${message.text || ""}`);
+    const isManagedGroup = [this.config.groupChatId, this.config.leadersGroupChatId]
+      .filter(Boolean)
+      .some((chatId) => String(chatId) === String(message.chat?.id || ""));
+    if (isManagedGroup) {
+      // Group posts are only sent through an explicit Roman approval flow.
+      // Commands and free-form messages in the groups remain deliberately silent.
+      return;
+    }
+
     const text = message.text || "";
     const command = text.startsWith("/")
       ? text.split(/\s+/)[0].split("@")[0].toLowerCase()
